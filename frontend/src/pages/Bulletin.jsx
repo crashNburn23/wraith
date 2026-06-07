@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { bulletin as bulletinApi, feedback as feedbackApi } from "../lib/api";
@@ -208,6 +208,7 @@ export default function Bulletin() {
   const [hidden, setHidden] = useState(loadHidden);
   const [showHidden, setShowHidden] = useState(false);
   const [page, setPage] = useState(0);
+  const autoBuilt = useRef(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["bulletin-today"],
@@ -221,6 +222,13 @@ export default function Bulletin() {
       setTimeout(() => qc.invalidateQueries({ queryKey: ["bulletin-today"] }), 2000);
     },
   });
+
+  useEffect(() => {
+    if (data && !data.items && !autoBuilt.current) {
+      autoBuilt.current = true;
+      buildMut.mutate();
+    }
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hideArticle = useCallback((articleId) => {
     setHidden(prev => {
@@ -298,9 +306,9 @@ export default function Bulletin() {
       {/* Cards */}
       {allItems.length === 0 ? (
         <EmptyState
-          title="No bulletin yet"
-          description="Ingest some feeds and enrich articles, then build today's bulletin."
-          action={<Button onClick={() => buildMut.mutate()}>Build Now</Button>}
+          title={buildMut.isPending ? "Building bulletin…" : "No bulletin yet"}
+          description={buildMut.isPending ? "Scoring and ranking enriched articles." : "Ingest some feeds and enrich articles, then build today's bulletin."}
+          action={buildMut.isPending ? <Spinner size="lg" /> : <Button onClick={() => buildMut.mutate()}>Build Now</Button>}
         />
       ) : visibleItems.length === 0 ? (
         <div className="text-center py-16">
