@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+.eggs/
+
+# Database
+backend/cti.db
+backend/cti.db-shm
+backend/cti.db-wal
+
+# Env
+.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Build artifacts
+backend/cti_platform.egg-info/
+
+# Claude Code local config
+.claude/
+
+# Editor
+.DS_Store
+.idea/
+*.swp
