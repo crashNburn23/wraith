@@ -6,14 +6,13 @@ A self-hosted, single-user Cyber Threat Intelligence platform. It ingests RSS fe
 
 **The loop:** Ingest → Enrich → Score → Bulletin → Feedback → better Bulletin tomorrow.
 
-No auth. No cloud dependencies by default. No embeddings. Runs entirely on localhost.
+No cloud dependencies by default. No embeddings. Runs entirely on localhost.
 
 ---
 
 ## Features
 
 - **Daily Bulletin** — all enriched articles ranked by a two-axis recommended score (threat severity + personal relevance). Paginated, filterable, hideable.
-- **Re-rank by prompt** — type a natural-language focus ("ransomware hitting healthcare") and the LLM reorders the bulletin around it without rebuilding.
 - **Interest Profile** — declare your sectors, threat actors, categories, and keywords. The profile match component scores every article against your profile from day one, no ratings required.
 - **Feedback loop** — 👍/👎 on any article feeds into the relevance score for future bulletins. The more you rate, the more personalised it gets.
 - **LLM Enrichment** — extracts AI summary, threat category, severity score (0–100), sector targets, geo data, IOCs, MITRE ATT&CK TTPs, threat actors, and CVE mentions from every article.
@@ -72,7 +71,7 @@ cp .env.example .env            # defaults work out of the box for Ollama
 ./start.sh dev
 ```
 
-Open **http://localhost:5173** — no login required.
+Open **http://localhost:5173** and sign in with the credentials from your `.env` (default: `admin` / `wraith`).
 
 ---
 
@@ -120,6 +119,11 @@ CVE_SYNC_HOUR=9
 BULLETIN_HOUR=10
 
 LOG_LEVEL=INFO
+
+# Auth
+SECRET_KEY=change-me-use-a-long-random-string
+AUTH_USERNAME=admin
+AUTH_PASSWORD=wraith
 ```
 
 ### Switching to Anthropic
@@ -259,8 +263,8 @@ cti_two/
 │       ├── models/                 # SQLAlchemy models
 │       ├── schemas/                # Pydantic request/response models
 │       ├── api/
-│       │   ├── deps.py             # get_db dependency
-│       │   └── routers/            # 10 routers (all prefixed /api)
+│       │   ├── deps.py             # get_db + require_auth dependencies
+│       │   └── routers/            # 11 routers (all prefixed /api)
 │       └── services/
 │           ├── enrichment_prompt.py    # LLM call + Pydantic extraction
 │           ├── enrichment_runner.py    # batch orchestration, pause/resume
@@ -287,6 +291,7 @@ cti_two/
         ├── index.css
         ├── lib/
         │   ├── api.js              # Axios wrappers for all backend endpoints
+        │   ├── auth.js             # token helpers (get/set/clear)
         │   └── utils.js
         ├── components/
         │   ├── Shell.jsx           # nav sidebar
@@ -295,10 +300,11 @@ cti_two/
         │   ├── HighlightedText.jsx
         │   └── ui.jsx              # Button, Input, Card, Spinner, etc.
         └── pages/
-            ├── Bulletin.jsx        # daily bulletin, re-rank, pagination
+            ├── Bulletin.jsx        # daily bulletin, pagination
             ├── ArticleDetail.jsx   # full article + inline-editable entities
             ├── IntelHub.jsx        # Articles / IOCs / CVEs / Actors tabs
             ├── Chat.jsx            # RAG chatbot
+            ├── Login.jsx           # login form
             └── Settings.jsx        # profile, sources, scoring, pipeline, storage
 ```
 
@@ -306,16 +312,17 @@ cti_two/
 
 ## API Reference
 
-All routes are prefixed `/api`. No authentication required.
+All routes are prefixed `/api`. All routes except `/health` and `/auth/login` require a `Authorization: Bearer <token>` header.
 
 | Router | Key endpoints |
 |---|---|
-| `/health` | `GET /health` |
+| `/health` | `GET /health` — public |
+| `/auth` | `POST /auth/login` — returns JWT; public |
 | `/sources` | CRUD + `POST /sources/import-csv` |
 | `/ingest` | `POST /run`, `GET /status` |
 | `/enrich` | `POST /run`, `POST /pause`, `POST /resume`, `GET /status`, `POST /articles/{id}` |
 | `/articles` | `GET /` (paginated + filtered), `GET /{id}` |
-| `/bulletin` | `GET /today`, `GET /{date}`, `GET /history`, `POST /build`, `POST /rerank` |
+| `/bulletin` | `GET /today`, `GET /{date}`, `GET /history`, `POST /build` |
 | `/feedback` | `POST /` (rate article), `PATCH /read-status/{id}` |
 | `/search` | `GET /` (full-text), `GET /ioc`, `GET /actors`, `GET /tags` |
 | `/cve` | `GET /`, `GET /stats`, `GET /{cve_id}`, `POST /sync` |

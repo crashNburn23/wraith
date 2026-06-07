@@ -1,4 +1,5 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
+import { clearToken } from "../lib/auth";
 
 const BulletinIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
@@ -32,13 +33,20 @@ const ShieldIcon = () => (
 );
 
 const links = [
-  { to: "/",        label: "Bulletin",  Icon: BulletinIcon },
-  { to: "/intel",   label: "Intel Hub", Icon: IntelIcon    },
-  { to: "/chat",    label: "Chat",      Icon: ChatIcon     },
-  { to: "/settings",label: "Settings",  Icon: SettingsIcon },
+  { to: "/",         label: "Bulletin",  Icon: BulletinIcon },
+  { to: "/intel",    label: "Intel Hub", Icon: IntelIcon    },
+  { to: "/chat",     label: "Chat",      Icon: ChatIcon     },
+  { to: "/settings", label: "Settings",  Icon: SettingsIcon },
 ];
 
 export default function Shell({ children }) {
+  const navigate = useNavigate();
+
+  function logout() {
+    clearToken();
+    navigate("/login", { replace: true });
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-navy-950">
       {/* Sidebar */}
@@ -91,11 +99,17 @@ export default function Shell({ children }) {
         </ul>
 
         {/* Footer */}
-        <div className="px-4 py-4 border-t border-navy-border">
+        <div className="px-4 py-4 border-t border-navy-border space-y-2">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
             <span className="text-[11px] text-slate-500">Online · localhost</span>
           </div>
+          <button
+            onClick={logout}
+            className="text-[11px] text-slate-600 hover:text-slate-400 transition-colors font-mono"
+          >
+            [logout]
+          </button>
         </div>
       </nav>
 

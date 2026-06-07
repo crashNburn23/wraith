@@ -36,6 +36,9 @@ dependencies = [
     "python-dateutil>=2.9",
     "anyio>=4.4",
     "python-multipart>=0.0.9",
+
+    # Auth
+    "PyJWT>=2.8",
 ]
 
 [project.optional-dependencies]

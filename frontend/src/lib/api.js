@@ -1,13 +1,35 @@
 import axios from "axios";
+import { clearToken, getToken } from "./auth";
 
 const api = axios.create({
   baseURL: "/api",
   headers: { "Content-Type": "application/json" },
 });
 
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401 && !err.config.url.endsWith("/auth/login")) {
+      clearToken();
+      window.location.href = "/login";
+    }
+    return Promise.reject(err);
+  },
+);
+
 export default api;
 
-// Convenience wrappers
+export const auth = {
+  login: (username, password) =>
+    api.post("/auth/login", { username, password }).then((r) => r.data),
+};
+
 export const sources = {
   list: () => api.get("/sources").then(r => r.data),
   create: (body) => api.post("/sources", body).then(r => r.data),
@@ -45,7 +67,6 @@ export const bulletin = {
   history: () => api.get("/bulletin/history").then(r => r.data),
   get: (date) => api.get(`/bulletin/${date}`).then(r => r.data),
   build: () => api.post("/bulletin/build").then(r => r.data),
-  rerank: (bulletin_date, prompt) => api.post("/bulletin/rerank", { bulletin_date, prompt }).then(r => r.data),
   scoreBreakdown: (itemId) => api.get(`/bulletin/items/${itemId}/score-breakdown`).then(r => r.data),
   rebuildItemScore: (itemId) => api.post(`/bulletin/rebuild-item/${itemId}`).then(r => r.data),
 };

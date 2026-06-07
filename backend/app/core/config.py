@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     CVE_SYNC_HOUR: int = 9
     BULLETIN_HOUR: int = 10
 
+    # Auth
+    SECRET_KEY: str = "change-me-in-production"
+    AUTH_USERNAME: str = "admin"
+    AUTH_PASSWORD: str = "wraith"
+
     # Logging
     LOG_LEVEL: str = "INFO"
 

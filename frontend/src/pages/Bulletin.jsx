@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { bulletin as bulletinApi, feedback as feedbackApi } from "../lib/api";
@@ -208,9 +208,6 @@ export default function Bulletin() {
   const [hidden, setHidden] = useState(loadHidden);
   const [showHidden, setShowHidden] = useState(false);
   const [page, setPage] = useState(0);
-  const [focusPrompt, setFocusPrompt] = useState("");
-  const [rerankResult, setRerankResult] = useState(null); // { items, prompt }
-  const focusRef = useRef(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["bulletin-today"],
@@ -221,14 +218,8 @@ export default function Bulletin() {
   const buildMut = useMutation({
     mutationFn: bulletinApi.build,
     onSuccess: () => {
-      setRerankResult(null);
       setTimeout(() => qc.invalidateQueries({ queryKey: ["bulletin-today"] }), 2000);
     },
-  });
-
-  const rerankMut = useMutation({
-    mutationFn: ({ date, prompt }) => bulletinApi.rerank(date, prompt),
-    onSuccess: (result) => { setRerankResult(result); setPage(0); },
   });
 
   const hideArticle = useCallback((articleId) => {
@@ -256,7 +247,7 @@ export default function Bulletin() {
   if (isLoading) return <div className="flex justify-center mt-20"><Spinner size="lg" /></div>;
   if (error)     return <div className="p-8 text-red-400">Error loading bulletin.</div>;
 
-  const allItems    = rerankResult?.items || data?.items || [];
+  const allItems    = data?.items || [];
   const hiddenCount = allItems.filter(item => hidden.has(item.article.id)).length;
   const visibleItems = showHidden
     ? allItems
@@ -278,55 +269,6 @@ export default function Bulletin() {
           {buildMut.isPending ? <><Spinner size="sm" /> Building…</> : "Build Bulletin"}
         </Button>
       </div>
-
-      {/* Re-rank focus bar */}
-      {data && allItems.length > 0 && (
-        <div className="mb-4">
-          {rerankResult ? (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono"
-              style={{ background: "rgba(119,34,170,0.08)", border: "1px solid rgba(119,34,170,0.3)" }}>
-              <span style={{ color: "#9B5DC8" }}>◈ FOCUS</span>
-              <span className="text-slate-300 flex-1 truncate">"{rerankResult.prompt}"</span>
-              <button
-                onClick={() => { setRerankResult(null); setFocusPrompt(""); setPage(0); }}
-                className="text-slate-500 hover:text-slate-200 transition-colors ml-2 flex-shrink-0"
-              >
-                [clear]
-              </button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <input
-                ref={focusRef}
-                value={focusPrompt}
-                onChange={e => setFocusPrompt(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && focusPrompt.trim() && !rerankMut.isPending)
-                    rerankMut.mutate({ date: data.bulletin_date, prompt: focusPrompt.trim() });
-                }}
-                placeholder="Re-rank by focus… e.g. 'ransomware hitting healthcare'"
-                className="flex-1 bg-navy-800 border border-navy-border rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-violet-600 focus:border-violet-600 font-mono"
-              />
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  if (focusPrompt.trim())
-                    rerankMut.mutate({ date: data.bulletin_date, prompt: focusPrompt.trim() });
-                }}
-                disabled={!focusPrompt.trim() || rerankMut.isPending}
-              >
-                {rerankMut.isPending ? <><Spinner size="sm" /> Thinking…</> : "Re-rank"}
-              </Button>
-            </div>
-          )}
-          {rerankMut.isError && (
-            <p className="text-red-400 text-xs mt-1 font-mono">
-              {rerankMut.error?.response?.data?.detail || "Re-rank failed"}
-            </p>
-          )}
-        </div>
-      )}
 
       {/* Filter bar — only when there are hidden items or many items */}
       {allItems.length > 0 && (

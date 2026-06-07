@@ -1,8 +1,4 @@
-import json
-import re
-
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date
 from app.api.deps import get_db
@@ -75,69 +71,6 @@ def get_bulletin(bulletin_date: str, db: Session = Depends(get_db)):
         "generated_at": bulletin.generated_at,
         "items": [_serialize_item(i) for i in bulletin.items],
     }
-
-
-class RerankRequest(BaseModel):
-    bulletin_date: str
-    prompt: str
-
-
-@router.post("/rerank")
-async def rerank_bulletin(body: RerankRequest, db: Session = Depends(get_db)):
-    import httpx
-    from app.services.llm_client import get_llm_client
-    from app.core.config import settings
-
-    bulletin = db.query(Bulletin).filter(Bulletin.bulletin_date == body.bulletin_date).first()
-    if not bulletin:
-        raise HTTPException(404, "Bulletin not found")
-    if not bulletin.items:
-        raise HTTPException(400, "Bulletin has no items")
-
-    items = sorted(bulletin.items, key=lambda i: i.rank)
-    lines = []
-    for item in items:
-        art = item.article
-        summary = (art.ai_summary or "")[:180]
-        cat = art.threat_category or ""
-        lines.append(f'ID:{item.id} | {art.title} | {cat} | {summary}')
-
-    llm_prompt = (
-        f'You are a CTI analyst assistant. Re-prioritize this threat intelligence bulletin based on the analyst\'s focus:\n\n'
-        f'FOCUS: "{body.prompt}"\n\n'
-        f'Items (current rank order):\n' + "\n".join(f"{i+1}. {l}" for i, l in enumerate(lines)) +
-        f'\n\nReturn ONLY a JSON array of the item IDs in your new priority order, most relevant first. '
-        f'Include every ID exactly once. Example: ["id-a", "id-b", "id-c"]'
-    )
-
-    client = get_llm_client()
-    try:
-        response = await client.chat.completions.create(
-            model=settings.LLM_MODEL,
-            max_tokens=600,
-            messages=[{"role": "user", "content": llm_prompt}],
-            timeout=httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0),
-        )
-        raw = response.choices[0].message.content.strip()
-        match = re.search(r'\[.*?\]', raw, re.DOTALL)
-        if not match:
-            raise ValueError(f"No JSON array in LLM response: {raw[:200]}")
-        ordered_ids = json.loads(match.group())
-    except Exception as e:
-        raise HTTPException(500, f"Rerank failed: {e}")
-
-    item_map = {item.id: _serialize_item(item) for item in items}
-    seen: set[str] = set()
-    reranked = []
-    for item_id in ordered_ids:
-        if item_id in item_map and item_id not in seen:
-            reranked.append(item_map[item_id])
-            seen.add(item_id)
-    for item in items:
-        if item.id not in seen:
-            reranked.append(item_map[item.id])
-
-    return {"items": reranked, "prompt": body.prompt}
 
 
 @router.post("/build")

@@ -175,11 +175,20 @@ def get_profile(db: Session = Depends(get_db)):
 
 @router.patch("/profile")
 def update_profile(body: UserProfileUpdate, db: Session = Depends(get_db)):
+    from sqlalchemy.orm.attributes import flag_modified
     p = _get_profile(db)
-    if body.sectors is not None:       p.sectors = body.sectors
-    if body.threat_actors is not None: p.threat_actors = body.threat_actors
-    if body.categories is not None:    p.categories = body.categories
-    if body.keywords is not None:      p.keywords = body.keywords
+    if body.sectors is not None:
+        p.sectors = body.sectors
+        flag_modified(p, "sectors")
+    if body.threat_actors is not None:
+        p.threat_actors = body.threat_actors
+        flag_modified(p, "threat_actors")
+    if body.categories is not None:
+        p.categories = body.categories
+        flag_modified(p, "categories")
+    if body.keywords is not None:
+        p.keywords = body.keywords
+        flag_modified(p, "keywords")
     db.commit()
     db.refresh(p)
     return {

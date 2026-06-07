@@ -1,27 +1,39 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import Shell from "./components/Shell";
 import { EntityModalProvider } from "./components/EntityModalContext";
-import Bulletin from "./pages/Bulletin";
+import { isAuthenticated } from "./lib/auth";
 import ArticleDetail from "./pages/ArticleDetail";
-import IntelHub from "./pages/IntelHub";
+import Bulletin from "./pages/Bulletin";
 import Chat from "./pages/Chat";
+import IntelHub from "./pages/IntelHub";
+import Login from "./pages/Login";
 import Settings from "./pages/Settings";
+
+function AuthLayout() {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />;
+  return (
+    <EntityModalProvider>
+      <Shell>
+        <Outlet />
+      </Shell>
+    </EntityModalProvider>
+  );
+}
 
 export default function App() {
   return (
     <BrowserRouter>
-      <EntityModalProvider>
-        <Shell>
-          <Routes>
-            <Route path="/" element={<Bulletin />} />
-            <Route path="/articles/:id" element={<ArticleDetail />} />
-            <Route path="/intel" element={<IntelHub />} />
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Shell>
-      </EntityModalProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route element={<AuthLayout />}>
+          <Route path="/" element={<Bulletin />} />
+          <Route path="/articles/:id" element={<ArticleDetail />} />
+          <Route path="/intel" element={<IntelHub />} />
+          <Route path="/chat" element={<Chat />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
     </BrowserRouter>
   );
 }
