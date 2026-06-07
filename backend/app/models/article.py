@@ -32,6 +32,6 @@ class Article(Base, TimestampMixin):
     ttp_tags = relationship("TTPTag", back_populates="article", cascade="all, delete-orphan")
     article_actors = relationship("ArticleActor", back_populates="article", cascade="all, delete-orphan")
     cve_mentions = relationship("CVEMention", back_populates="article", cascade="all, delete-orphan")
-    bulletin_items = relationship("BulletinItem", back_populates="article")
+    bulletin_items = relationship("BulletinItem", back_populates="article", cascade="all, delete-orphan")
     feedback = relationship("Feedback", back_populates="article", cascade="all, delete-orphan")
     read_status = relationship("ReadStatus", back_populates="article", uselist=False, cascade="all, delete-orphan")

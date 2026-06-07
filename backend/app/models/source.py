@@ -15,4 +15,4 @@ class Source(Base, TimestampMixin):
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    articles = relationship("Article", back_populates="source", lazy="dynamic")
+    articles = relationship("Article", back_populates="source", lazy="dynamic", cascade="all, delete-orphan")
