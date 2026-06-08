@@ -5,6 +5,7 @@ import { isAuthenticated } from "./lib/auth";
 import ArticleDetail from "./pages/ArticleDetail";
 import Bulletin from "./pages/Bulletin";
 import Chat from "./pages/Chat";
+import FeedbackHistory from "./pages/FeedbackHistory";
 import IntelHub from "./pages/IntelHub";
 import Login from "./pages/Login";
 import Settings from "./pages/Settings";
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/articles/:id" element={<ArticleDetail />} />
           <Route path="/intel" element={<IntelHub />} />
           <Route path="/chat" element={<Chat />} />
+          <Route path="/feedback" element={<FeedbackHistory />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

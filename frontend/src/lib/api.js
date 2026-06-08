@@ -74,8 +74,11 @@ export const bulletin = {
 export const feedback = {
   rate: (articleId, rating) => api.post("/feedback", { article_id: articleId, rating }).then(r => r.data),
   getForArticle: (id) => api.get(`/feedback/article/${id}`).then(r => r.data),
+  setReasons: (articleId, reasonTags) => api.patch(`/feedback/${articleId}/reasons`, { reason_tags: reasonTags }).then(r => r.data),
   setReadStatus: (articleId, status) => api.patch(`/feedback/read-status/${articleId}`, { status }).then(r => r.data),
   getReadStatus: (articleId) => api.get(`/feedback/read-status/${articleId}`).then(r => r.data),
+  summarize: () => api.post("/feedback/summarize").then(r => r.data),
+  applyNote: (text) => api.post("/feedback/notes/apply", { text }).then(r => r.data),
 };
 
 export const search = {

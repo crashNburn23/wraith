@@ -24,6 +24,9 @@ class BulletinItemOut(BaseModel):
     rank: int
     article: ArticleListItem
     score: ScoreBreakdown
+    user_rating: Optional[int] = None   # -1, 1, or None (unrated)
+    user_reason_tags: list = []
+    read_status: str = "unread"
     model_config = {"from_attributes": True}
 
 

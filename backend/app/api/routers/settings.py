@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.api.deps import get_db
-from app.models import ScoringConfig, Feedback, Article, UserProfile
+from app.models import ScoringConfig, Feedback, ReadStatus, Article, UserProfile
 from app.schemas.scoring import ScoringConfigOut, ScoringConfigUpdate
 from app.services.scoring import _get_config, _get_profile
 from app.services.scheduler import get_scheduler
@@ -55,67 +55,101 @@ def feedback_signal_transparency(db: Session = Depends(get_db)):
     config = _get_config(db)
     cutoff = datetime.now(timezone.utc) - timedelta(days=config.feedback_lookback_days)
 
-    # All non-zero ratings within the lookback window
-    rows = (
+    # Explicit non-zero ratings — use updated_at so re-ratings count freshly
+    fb_rows = (
         db.query(Feedback)
-        .filter(Feedback.rating != 0, Feedback.created_at >= cutoff)
-        .order_by(Feedback.created_at.desc())
+        .filter(Feedback.rating != 0, Feedback.updated_at >= cutoff)
+        .order_by(Feedback.updated_at.desc())
         .all()
     )
+    explicit_ids = {r.article_id for r in fb_rows}
 
-    article_ids = [r.article_id for r in rows]
+    # Dismissed = implicit -1
+    dismissed_rows = (
+        db.query(ReadStatus)
+        .filter(ReadStatus.status == "dismissed", ReadStatus.updated_at >= cutoff)
+        .order_by(ReadStatus.updated_at.desc())
+        .all()
+    )
+    dismissed_rows = [d for d in dismissed_rows if d.article_id not in explicit_ids]
+
+    all_article_ids = list(explicit_ids | {d.article_id for d in dismissed_rows})
     articles_map = {
         a.id: a
-        for a in db.query(Article).filter(Article.id.in_(article_ids)).all()
-    } if article_ids else {}
+        for a in db.query(Article).filter(Article.id.in_(all_article_ids)).all()
+    } if all_article_ids else {}
+
+    def _features(art):
+        if not art:
+            return {}
+        return {
+            "threat_category": art.threat_category,
+            "ttps": [t.technique_id for t in art.ttp_tags],
+            "actors": [aa.actor.name for aa in art.article_actors if aa.actor],
+            "sectors": art.sector_targets or [],
+        }
 
     rated = []
-    for fb in rows:
+    for fb in fb_rows:
         art = articles_map.get(fb.article_id)
         rated.append({
             "article_id": fb.article_id,
             "title": art.title if art else "(article deleted)",
             "rating": fb.rating,
-            "rated_at": fb.created_at.isoformat() if fb.created_at else None,
-            "features": {
-                "threat_category": art.threat_category if art else None,
-                "ttps": [t.technique_id for t in art.ttp_tags] if art else [],
-                "actors": [aa.actor.name for aa in art.article_actors if aa.actor] if art else [],
-                "sectors": art.sector_targets or [],
-            } if art else {},
+            "source": "explicit",
+            "reason_tags": fb.reason_tags or [],
+            "rated_at": fb.updated_at.isoformat() if fb.updated_at else None,
+            "features": _features(art),
+        })
+    for d in dismissed_rows:
+        art = articles_map.get(d.article_id)
+        rated.append({
+            "article_id": d.article_id,
+            "title": art.title if art else "(article deleted)",
+            "rating": -1,
+            "source": "dismissed",
+            "reason_tags": [],
+            "rated_at": d.updated_at.isoformat() if d.updated_at else None,
+            "features": _features(art),
         })
 
-    active = len(rows) >= config.min_feedback_articles
+    total_signals = len(fb_rows) + len(dismissed_rows)
+    active = total_signals >= config.min_feedback_articles
 
     return {
         "status": "active" if active else "inactive",
         "active_reason": (
-            f"{len(rows)} rated articles in window"
+            f"{total_signals} signal(s) in window ({len(fb_rows)} rated, {len(dismissed_rows)} dismissed)"
             if active
-            else f"Need {config.min_feedback_articles} rated articles, have {len(rows)} in the last {config.feedback_lookback_days} days"
+            else f"Need {config.min_feedback_articles} signals, have {total_signals} in the last {config.feedback_lookback_days} days"
         ),
         "config": {
             "lookback_days": config.feedback_lookback_days,
             "min_feedback_articles": config.min_feedback_articles,
             "weight_in_score": config.weight_feedback_signal,
+            "decay_half_life_days": config.feedback_decay_half_life_days,
         },
         "formula": (
-            "For each past-rated article within the lookback window:\n"
+            "For each signal (explicit rating or dismissed article) within the lookback window:\n"
             "  overlap_score = shared_features / (target_ttp_count + 2)\n"
+            "  decay = exp(-ln(2) × age_days / decay_half_life_days)\n"
+            "  effective_weight = overlap_score × decay\n"
             "  where shared_features = matching category + TTPs + actors + sectors\n"
-            "weighted_mean = Σ(overlap_score × rating) / Σ(overlap_score)\n"
+            "  dismissed articles count as rating = -1\n"
+            "weighted_mean = Σ(effective_weight × rating) / Σ(effective_weight)\n"
             "signal = (weighted_mean + 1) / 2   ← normalised to [0, 1]\n"
-            "Only articles with at least one overlapping feature contribute."
+            "Only signals with at least one overlapping feature contribute."
         ),
         "storage": {
             "ratings_table": "feedback",
-            "ratings_columns": ["id", "article_id", "rating (-1/0/1)", "created_at"],
+            "ratings_columns": ["id", "article_id", "rating (-1/0/1)", "updated_at"],
+            "dismissed_table": "read_status (status=dismissed)",
             "contributing_articles_field": "bulletin_items.feedback_signal_articles (JSON array per item)",
             "config_table": "scoring_config",
-            "config_columns": ["feedback_lookback_days", "min_feedback_articles", "weight_feedback_signal"],
+            "config_columns": ["feedback_lookback_days", "min_feedback_articles", "weight_feedback_signal", "feedback_decay_half_life_days"],
         },
         "rated_articles": rated,
-        "rated_in_window": len(rows),
+        "rated_in_window": total_signals,
     }
 
 
@@ -216,6 +250,7 @@ def reset_scoring_config(db: Session = Depends(get_db)):
     config.feedback_lookback_days = 90
     config.recency_half_life_days = 3.0
     config.min_feedback_articles = 3
+    config.feedback_decay_half_life_days = 30.0
     db.commit()
     db.refresh(config)
     return config

@@ -13,6 +13,7 @@ class ScoringConfigOut(BaseModel):
     feedback_lookback_days: int
     recency_half_life_days: float
     min_feedback_articles: int
+    feedback_decay_half_life_days: float
     updated_at: datetime
     model_config = {"from_attributes": True}
 
@@ -26,6 +27,7 @@ class ScoringConfigUpdate(BaseModel):
     feedback_lookback_days: Optional[int] = None
     recency_half_life_days: Optional[float] = None
     min_feedback_articles: Optional[int] = None
+    feedback_decay_half_life_days: Optional[float] = None
 
     @model_validator(mode="after")
     def weights_sum_to_one(self):

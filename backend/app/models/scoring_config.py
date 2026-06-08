@@ -19,3 +19,4 @@ class ScoringConfig(Base, TimestampMixin):
     feedback_lookback_days: Mapped[int] = mapped_column(Integer, default=90)
     recency_half_life_days: Mapped[float] = mapped_column(Float, default=3.0)
     min_feedback_articles: Mapped[int] = mapped_column(Integer, default=3)
+    feedback_decay_half_life_days: Mapped[float] = mapped_column(Float, default=30.0)

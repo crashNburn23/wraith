@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { bulletin as bulletinApi, feedback as feedbackApi } from "../lib/api";
+import { bulletin as bulletinApi, feedback as feedbackApi, settings as settingsApi } from "../lib/api";
 import { Button, Spinner, EmptyState } from "../components/ui";
 import { ScoreBreakdownPanel } from "../components/ScoreBreakdown";
 import { timeAgo, categoryColor, severityBg } from "../lib/utils";
@@ -67,47 +67,108 @@ function CyberScoreBadge({ score, expanded, onToggle }) {
   );
 }
 
-// ─── Feedback buttons ─────────────────────────────────────────────────────────
+// ─── Feedback buttons + reason tags ──────────────────────────────────────────
 
-function FeedbackButtons({ articleId }) {
+const STATIC_REASON_TAGS = [
+  { key: "too_vague",      label: "too vague"      },
+  { key: "not_actionable", label: "not actionable" },
+];
+
+function buildReasonTags(article) {
+  const tags = [];
+  if (article?.threat_category) {
+    tags.push({ key: "wrong_category", label: `not my area: ${article.threat_category.toLowerCase()}` });
+  }
+  if (article?.sector_targets?.length) {
+    tags.push({ key: "wrong_sector", label: "not my sector" });
+  }
+  return [...tags, ...STATIC_REASON_TAGS];
+}
+
+function FeedbackButtons({ articleId, article, initialRating = null, initialReasonTags = null }) {
   const qc = useQueryClient();
-  const [rated, setRated] = useState(null);
-  const mut = useMutation({
+  const [rated, setRated] = useState(initialRating);
+  const [reasonTags, setReasonTags] = useState(initialReasonTags || []);
+
+  useEffect(() => { setRated(initialRating); }, [initialRating]);
+  useEffect(() => { setReasonTags(initialReasonTags || []); }, [initialReasonTags]);
+
+  const rateMut = useMutation({
     mutationFn: ({ rating }) => feedbackApi.rate(articleId, rating),
     onSuccess: (_, { rating }) => {
       setRated(rating);
+      if (rating !== -1) setReasonTags([]);
       qc.invalidateQueries({ queryKey: ["bulletin-today"] });
+      qc.invalidateQueries({ queryKey: ["feedback-signal"] });
     },
   });
+
+  const toggleTag = (key) => {
+    const next = reasonTags.includes(key)
+      ? reasonTags.filter(t => t !== key)
+      : [...reasonTags, key];
+    setReasonTags(next);
+    feedbackApi.setReasons(articleId, next);
+  };
+
+  const availableTags = buildReasonTags(article);
+
   const btn = (rating, emoji, hoverCls, activeCls) => (
     <button
-      onClick={() => { if (rated !== rating) mut.mutate({ rating }); }}
-      disabled={mut.isPending}
+      onClick={() => { if (rated !== rating) rateMut.mutate({ rating }); }}
+      disabled={rateMut.isPending}
       className={`px-2 py-1 rounded text-sm transition-colors ${rated === rating ? activeCls : `text-slate-500 hover:${hoverCls}`}`}
       title={rating === 1 ? "Relevant" : "Not relevant"}
     >
       {emoji}
     </button>
   );
+
   return (
-    <div className="flex items-center gap-0.5">
-      {btn(1,  "👍", "bg-emerald-900/40 text-emerald-400", "bg-emerald-900/50 text-emerald-300")}
-      {btn(-1, "👎", "bg-red-900/40 text-red-400",        "bg-red-900/50 text-red-300")}
+    <div>
+      <div className="flex items-center gap-0.5">
+        {btn(1,  "👍", "bg-emerald-900/40 text-emerald-400", "bg-emerald-900/50 text-emerald-300")}
+        {btn(-1, "👎", "bg-red-900/40 text-red-400",        "bg-red-900/50 text-red-300")}
+      </div>
+      {rated === -1 && (
+        <div className="mt-1.5 flex flex-wrap gap-1 items-center">
+          <span className="text-[9px] text-slate-600 font-mono select-none">why?</span>
+          {availableTags.map(tag => (
+            <button
+              key={tag.key}
+              onClick={() => toggleTag(tag.key)}
+              className={`text-[9px] px-1.5 py-0.5 rounded font-mono transition-colors border ${
+                reasonTags.includes(tag.key)
+                  ? "bg-red-900/40 text-red-300 border-red-500/40"
+                  : "bg-navy-800/60 text-slate-600 border-slate-700/40 hover:text-slate-400 hover:border-slate-600/60"
+              }`}
+            >
+              {tag.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Read status ──────────────────────────────────────────────────────────────
 
-function ReadStatusCycle({ articleId }) {
-  const [status, setStatus] = useState("unread");
+function ReadStatusCycle({ articleId, initialStatus = "unread" }) {
+  const qc = useQueryClient();
+  const [status, setStatus] = useState(initialStatus);
+
+  useEffect(() => { setStatus(initialStatus); }, [initialStatus]);
+
   const cycle  = { unread: "acknowledged", acknowledged: "dismissed", dismissed: "unread" };
   const labels = { unread: "○", acknowledged: "✓", dismissed: "—" };
   const colors = { unread: "text-slate-700", acknowledged: "text-emerald-500", dismissed: "text-slate-600" };
   const toggle = () => {
     const next = cycle[status];
     setStatus(next);
-    feedbackApi.setReadStatus(articleId, next);
+    feedbackApi.setReadStatus(articleId, next).then(() => {
+      qc.invalidateQueries({ queryKey: ["feedback-signal"] });
+    });
   };
   return (
     <button onClick={toggle} className={`text-sm leading-none ${colors[status]} hover:opacity-70 transition-opacity`} title={`Mark ${cycle[status]}`}>
@@ -119,7 +180,7 @@ function ReadStatusCycle({ articleId }) {
 // ─── Bulletin card ────────────────────────────────────────────────────────────
 
 function BulletinCard({ item, onHide, dimmed = false }) {
-  const { article, score, rank } = item;
+  const { article, score, rank, user_rating, user_reason_tags, read_status } = item;
   const [expanded, setExpanded] = useState(false);
   const c = cyberColor(score.computed_score);
 
@@ -144,7 +205,7 @@ function BulletinCard({ item, onHide, dimmed = false }) {
             <span className="text-sm font-bold font-mono leading-none" style={{ color: c.hex, opacity: 0.35 }}>
               {rank}
             </span>
-            <ReadStatusCycle articleId={article.id} />
+            <ReadStatusCycle articleId={article.id} initialStatus={read_status} />
           </div>
 
           <div className="flex-1 min-w-0">
@@ -170,7 +231,7 @@ function BulletinCard({ item, onHide, dimmed = false }) {
 
             {/* Actions row */}
             <div className="flex items-center gap-3">
-              <FeedbackButtons articleId={article.id} />
+              <FeedbackButtons articleId={article.id} article={article} initialRating={user_rating} initialReasonTags={user_reason_tags} />
               <a href={article.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-600 hover:text-brand-400">
                 source ↗
               </a>
@@ -214,6 +275,12 @@ export default function Bulletin() {
     queryKey: ["bulletin-today"],
     queryFn: bulletinApi.today,
     refetchInterval: 60_000,
+  });
+
+  const { data: fbSignal } = useQuery({
+    queryKey: ["feedback-signal"],
+    queryFn: settingsApi.feedbackSignal,
+    staleTime: 60_000,
   });
 
   const buildMut = useMutation({
@@ -277,6 +344,14 @@ export default function Bulletin() {
           {buildMut.isPending ? <><Spinner size="sm" /> Building…</> : "Build Bulletin"}
         </Button>
       </div>
+
+      {/* Feedback cold-start notice */}
+      {fbSignal?.status === "inactive" && (
+        <div className="mb-4 px-3 py-2 rounded-lg border border-amber-500/20 bg-amber-500/5 flex items-center gap-2">
+          <span className="text-amber-400/70 text-[10px] font-mono font-semibold uppercase tracking-widest flex-shrink-0">FEEDBACK LOOP</span>
+          <span className="text-amber-300/60 text-[11px] font-mono">{fbSignal.active_reason}</span>
+        </div>
+      )}
 
       {/* Filter bar — only when there are hidden items or many items */}
       {allItems.length > 0 && (

@@ -9,7 +9,12 @@ from app.schemas.article import ArticleListItem
 router = APIRouter(prefix="/bulletin", tags=["bulletin"])
 
 
-def _serialize_item(item: BulletinItem) -> BulletinItemOut:
+def _serialize_item(
+    item: BulletinItem,
+    user_rating: int | None = None,
+    user_reason_tags: list | None = None,
+    read_status: str = "unread",
+) -> BulletinItemOut:
     return BulletinItemOut(
         id=item.id,
         rank=item.rank,
@@ -28,7 +33,25 @@ def _serialize_item(item: BulletinItem) -> BulletinItemOut:
             raw_recency_factor=item.raw_recency_factor,
             feedback_signal_articles=item.feedback_signal_articles,
         ),
+        user_rating=user_rating,
+        user_reason_tags=user_reason_tags or [],
+        read_status=read_status,
     )
+
+
+def _bulk_user_state(db: Session, article_ids: list[str]) -> tuple[dict, dict, dict]:
+    """Return (rating_map, reason_map, read_map) keyed by article_id."""
+    if not article_ids:
+        return {}, {}, {}
+    rating_map, reason_map = {}, {}
+    for f in db.query(Feedback).filter(Feedback.article_id.in_(article_ids)).all():
+        rating_map[f.article_id] = f.rating
+        reason_map[f.article_id] = f.reason_tags or []
+    read_map = {
+        rs.article_id: rs.status
+        for rs in db.query(ReadStatus).filter(ReadStatus.article_id.in_(article_ids)).all()
+    }
+    return rating_map, reason_map, read_map
 
 
 @router.get("/today")
@@ -38,11 +61,22 @@ def today_bulletin(db: Session = Depends(get_db)):
     if not bulletin:
         return {"bulletin": None, "message": "No bulletin for today. Use /bulletin/build to generate one."}
 
+    article_ids = [i.article_id for i in bulletin.items]
+    rating_map, reason_map, read_map = _bulk_user_state(db, article_ids)
+
     return {
         "id": bulletin.id,
         "bulletin_date": bulletin.bulletin_date,
         "generated_at": bulletin.generated_at,
-        "items": [_serialize_item(i) for i in bulletin.items],
+        "items": [
+            _serialize_item(
+                i,
+                rating_map.get(i.article_id),
+                reason_map.get(i.article_id),
+                read_map.get(i.article_id, "unread"),
+            )
+            for i in bulletin.items
+        ],
     }
 
 
@@ -65,11 +99,21 @@ def get_bulletin(bulletin_date: str, db: Session = Depends(get_db)):
     bulletin = db.query(Bulletin).filter(Bulletin.bulletin_date == bulletin_date).first()
     if not bulletin:
         raise HTTPException(404, "Bulletin not found")
+    article_ids = [i.article_id for i in bulletin.items]
+    rating_map, reason_map, read_map = _bulk_user_state(db, article_ids)
     return {
         "id": bulletin.id,
         "bulletin_date": bulletin.bulletin_date,
         "generated_at": bulletin.generated_at,
-        "items": [_serialize_item(i) for i in bulletin.items],
+        "items": [
+            _serialize_item(
+                i,
+                rating_map.get(i.article_id),
+                reason_map.get(i.article_id),
+                read_map.get(i.article_id, "unread"),
+            )
+            for i in bulletin.items
+        ],
     }
 
 

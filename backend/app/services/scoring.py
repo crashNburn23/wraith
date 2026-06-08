@@ -10,7 +10,7 @@ import math
 import logging
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
-from app.models import Article, Feedback, CVEMention, CVERecord, ScoringConfig, UserProfile
+from app.models import Article, Feedback, ReadStatus, CVEMention, CVERecord, ScoringConfig, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -52,31 +52,49 @@ def _feedback_signal(
     article: Article,
     lookback_days: int,
     min_feedback_articles: int,
+    decay_half_life_days: float,
 ) -> tuple[float, list[dict]]:
     """
     Returns (signal_0_to_1, contributing_articles[])
 
-    contributing_articles: list of dicts for score-breakdown transparency
-    {article_id, title, overlap_reasons[], feedback_rating}
+    Combines explicit ratings (👍/👎) and implicit dismissed signals.
+    Each signal is weighted by feature overlap and exponential time decay.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    now = datetime.now(timezone.utc)
 
-    # Collect past feedback rows with rating != 0
+    # Explicit non-zero ratings — use updated_at so a re-rating counts freshly
     past_feedback = (
         db.query(Feedback)
-        .filter(Feedback.rating != 0, Feedback.created_at >= cutoff)
+        .filter(Feedback.rating != 0, Feedback.updated_at >= cutoff)
         .all()
     )
-    if len(past_feedback) < min_feedback_articles:
+    # article_id -> (rating, timestamp, reason_tags)
+    explicit_map: dict[str, tuple[int, datetime, list]] = {
+        f.article_id: (f.rating, f.updated_at, f.reason_tags or []) for f in past_feedback
+    }
+
+    # Dismissed articles = implicit -1, skip any already explicitly rated
+    dismissed_q = db.query(ReadStatus).filter(
+        ReadStatus.status == "dismissed",
+        ReadStatus.updated_at >= cutoff,
+    )
+    if explicit_map:
+        dismissed_q = dismissed_q.filter(
+            ~ReadStatus.article_id.in_(list(explicit_map.keys()))
+        )
+    dismissed = dismissed_q.all()
+
+    # Merge: dismissed articles carry no reason_tags (implicit signal)
+    signal_rows: dict[str, tuple[int, datetime, list]] = dict(explicit_map)
+    for d in dismissed:
+        signal_rows[d.article_id] = (-1, d.updated_at, [])
+
+    if len(signal_rows) < min_feedback_articles:
         return 0.0, []
 
-    # Build a lookup: article_id → rating
-    past_ids = {f.article_id: f.rating for f in past_feedback}
+    past_articles = db.query(Article).filter(Article.id.in_(signal_rows.keys())).all()
 
-    # Load past articles
-    past_articles = db.query(Article).filter(Article.id.in_(past_ids.keys())).all()
-
-    # Build feature sets for the target article
     target_category = article.threat_category or ""
     target_ttps = {t.technique_id for t in article.ttp_tags}
     target_actors = {aa.actor_id for aa in article.article_actors}
@@ -86,8 +104,16 @@ def _feedback_signal(
     weighted_sum = 0.0
     weight_total = 0.0
 
+    _QUALITY_TAGS = {"too_vague", "not_actionable"}
+    _FEATURE_TAG_MAP = {
+        "wrong_category": lambda r: r.startswith("category:"),
+        "wrong_sector":   lambda r: r == "shared_sector",
+        "wrong_actor":    lambda r: r == "shared_actor",
+        "wrong_ttp":      lambda r: r.startswith("ttp:"),
+    }
+
     for past in past_articles:
-        rating = past_ids[past.id]
+        rating, ts, reason_tags = signal_rows[past.id]
         overlap_reasons = []
 
         if past.threat_category and past.threat_category == target_category:
@@ -109,11 +135,38 @@ def _feedback_signal(
         if not overlap_reasons:
             continue
 
-        overlap_score = len(overlap_reasons) / max(
-            len(target_ttps) + 2, 1
-        )  # normalise by feature count
-        weighted_sum += overlap_score * rating
-        weight_total += overlap_score
+        # Apply reason tags for negative ratings: filter overlaps to only the
+        # tagged dimensions, making penalization more precise.
+        if rating < 0 and reason_tags:
+            feature_tags = set(reason_tags) - _QUALITY_TAGS
+            if feature_tags:
+                overlap_reasons = [
+                    r for r in overlap_reasons
+                    if any(
+                        pred(r)
+                        for tag, pred in _FEATURE_TAG_MAP.items()
+                        if tag in feature_tags
+                    )
+                ]
+                if not overlap_reasons:
+                    continue  # tagged dimensions don't overlap — skip signal
+
+        overlap_score = len(overlap_reasons) / max(len(target_ttps) + 2, 1)
+
+        # Exponential decay — older feedback weighs less
+        ts_aware = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+        age_days = max(0.0, (now - ts_aware).total_seconds() / 86400)
+        decay = math.exp(-math.log(2) * age_days / decay_half_life_days)
+
+        eff_weight = overlap_score * decay
+
+        # Quality-only tags: tone down the topic penalty — it's about content,
+        # not topic mismatch, so future similar articles shouldn't be hit as hard.
+        if rating < 0 and reason_tags and not (set(reason_tags) - _QUALITY_TAGS):
+            eff_weight *= 0.25
+
+        weighted_sum += eff_weight * rating
+        weight_total += eff_weight
 
         contributors.append({
             "article_id": past.id,
@@ -125,9 +178,8 @@ def _feedback_signal(
     if weight_total == 0:
         return 0.0, []
 
-    # Normalise to [0, 1]: raw weighted mean is in [-1, 1]
     raw_signal = weighted_sum / weight_total
-    signal = (raw_signal + 1) / 2  # shift to [0, 1]
+    signal = (raw_signal + 1) / 2  # normalise to [0, 1]
 
     return round(signal, 4), contributors
 
@@ -191,7 +243,11 @@ def compute_score(
     raw_kev = _kev_bonus(db, article)
     raw_rec = _recency_factor(article.published_at, config.recency_half_life_days)
     raw_fb, fb_articles = _feedback_signal(
-        db, article, config.feedback_lookback_days, config.min_feedback_articles
+        db,
+        article,
+        config.feedback_lookback_days,
+        config.min_feedback_articles,
+        config.feedback_decay_half_life_days,
     )
     raw_pm = _profile_match(article, profile)
 

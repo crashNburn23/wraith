@@ -12,16 +12,19 @@ No cloud dependencies by default. No embeddings. Runs entirely on localhost.
 
 ## Features
 
-- **Daily Bulletin** — all enriched articles ranked by a two-axis recommended score (threat severity + personal relevance). Paginated, filterable, hideable.
+- **Daily Bulletin** — enriched articles ranked by a two-axis recommended score (threat severity + personal relevance). Paginated, filterable, dismissable.
 - **Interest Profile** — declare your sectors, threat actors, categories, and keywords. The profile match component scores every article against your profile from day one, no ratings required.
-- **Feedback loop** — 👍/👎 on any article feeds into the relevance score for future bulletins. The more you rate, the more personalised it gets.
+- **Feedback loop** — 👍/👎 on any article feeds into the relevance score. After ≥3 signals the loop activates; a cold-start banner on the bulletin shows progress. Feedback decays exponentially with a configurable half-life so recent signals carry more weight.
+- **Reason tags** — attach a reason to any 👎 to make the penalty surgical. Feature tags (`not my area`, `not my sector`) limit the penalty to the tagged dimension only. Quality tags (`too vague`, `not actionable`) dampen the signal instead of removing it.
+- **Dismissed = signal** — dismissing an article (—) counts as an implicit −1 in the feedback model, no explicit rating needed.
+- **Feedback History page** — full transparency: active/inactive status, signal stats, LLM-generated preference summary, interest profile editor, natural language feedback input, and the raw signal list with reason tags.
 - **LLM Enrichment** — extracts AI summary, threat category, severity score (0–100), sector targets, geo data, IOCs, MITRE ATT&CK TTPs, threat actors, and CVE mentions from every article.
 - **Intel Hub** — searchable, filterable views across Articles, IOCs, CVEs, and Actors.
 - **CVE tracking** — CVSS, EPSS, and CISA KEV data for every CVE mentioned in your articles.
 - **RAG Chat** — ask questions about your intel database; retrieval is keyword-based over enriched articles, IOCs, CVEs, and actors.
 - **Score transparency** — every bulletin card shows a full drill-down: threat axis (AI severity + KEV bonus) and relevance axis (profile match + feedback signal + recency), with per-component bars and contributing articles.
 - **RSS management** — add feeds manually or import a CSV. Toggle active/inactive, see failure counts.
-- **Data retention** — automated weekly pruning keeps the DB lean. `scraped_text` is held 30 days post-enrichment (enough for article text view), then nulled.
+- **Data retention** — automated weekly pruning keeps the DB lean.
 
 ---
 
@@ -60,8 +63,8 @@ ollama pull qwen2.5:7b          # ~4.7 GB — good quality
 # ollama pull qwen2.5:14b       # ~9 GB — better quality, recommended with GPU
 
 # 2. Clone and configure
-git clone <repo-url> cti_two
-cd cti_two
+git clone <repo-url> wraith
+cd wraith
 cp .env.example .env            # defaults work out of the box for Ollama
 
 # 3. Install dependencies, run migrations, seed RSS sources
@@ -82,7 +85,8 @@ After `./start.sh dev` the database is empty. Run the pipeline once manually:
 1. **Settings → Pipeline → Ingest → Run Now** — fetches all 10 seeded RSS feeds (~50–150 articles)
 2. **Settings → Pipeline → Enrich → Run Now** — runs LLM enrichment on every pending article *(takes a while — watch the progress bar)*
 3. **Settings → Build Bulletin** — scores and ranks all enriched articles into today's bulletin
-4. **Settings → Interest Profile** — add your sectors, threat actors, and keywords so the profile match component starts working immediately
+4. **Feedback → Interest Profile** — add your sectors, threat actors, and keywords so the profile match component starts working immediately
+5. Rate a few articles on the bulletin with 👍/👎 to activate the feedback loop
 
 After that, the scheduler takes over automatically (see [Scheduled Jobs](#scheduled-jobs)).
 
@@ -169,11 +173,11 @@ relevance_score = (weight_profile_match  × profile_match)
 | KEV Bonus | 10% | Threat | Article mentions a CISA KEV CVE |
 | Recency | 10% | Relevance | Exponential decay, 3-day half-life |
 
-All weights are editable in **Settings → Scoring Weights** and must sum to 100%.
+All weights are editable in **Settings → Scoring** and must sum to 100%.
 
 ### Interest Profile
 
-The profile match component scores articles against four dimensions you define in **Settings → Interest Profile**:
+The profile match component scores articles against four dimensions you define in **Feedback → Interest Profile**:
 
 | Dimension | Matched against |
 |---|---|
@@ -184,9 +188,41 @@ The profile match component scores articles against four dimensions you define i
 
 Score per dimension = `overlapping items / profile items in that dimension`, averaged across populated dimensions. An empty profile scores 0 for profile match — the 25% weight is effectively reassigned to other factors.
 
+You can also populate your profile by typing a natural language description in **Feedback → Natural Language Feedback** — the LLM extracts sectors, categories, keywords, and threat actors and merges them in additively.
+
 ### Feedback Signal
 
-After you rate ≥3 articles within the lookback window (default 90 days), the feedback signal activates. It computes weighted overlap between each candidate article and your past-rated articles across category, TTPs, actors, and sectors. The full contributing article list is visible in the score breakdown drill-down.
+After you rate ≥3 articles within the lookback window (default 90 days), the feedback signal activates. A cold-start amber banner on the bulletin shows how many signals you have vs. the threshold.
+
+**How it works:**
+
+- Each explicit 👍/👎 rating and each dismissed article (implicit −1) within the lookback window is a signal
+- For a candidate article, overlap is computed across category, TTPs, actors, and sectors vs. each signal
+- Each signal's contribution is weighted by overlap score and decays exponentially: `decay = exp(-ln(2) × age_days / half_life_days)` (default half-life: 30 days)
+- Only signals with at least one overlapping feature contribute
+
+**Reason tags** (attached to 👎) make penalties surgical:
+
+| Tag | Effect |
+|---|---|
+| `not my area: {category}` | Only the category dimension drives the penalty; TTP/actor/sector overlaps are ignored |
+| `not my sector` | Only the sector dimension drives the penalty |
+| `too vague` / `not actionable` | Signal weight reduced by 75% — topic signal preserved but dampened |
+
+The full list of contributing signals and the formula are visible at **Feedback → Signals in window**.
+
+---
+
+## Feedback History Page
+
+The **Feedback** nav item opens a dedicated page with:
+
+- **Status banner** — active (green) or inactive (amber) with the reason
+- **Stats row** — total signals, 👍 liked, 👎 skipped/dismissed, lookback window
+- **Preference Summary** — click Generate for an LLM-written 2–3 sentence summary of what you've engaged with vs. skipped, based on your rating history
+- **Interest Profile** — edit sectors, threat actors, categories, and keywords directly; save to apply immediately to the next bulletin build
+- **Natural Language Feedback** — type a description of your interests; the LLM extracts structured preferences and merges them into your profile additively
+- **Signal list** — every rated/dismissed article in the current window, with rating badge, enriched feature tags, reason tags, and timestamp
 
 ---
 
@@ -239,7 +275,7 @@ The `url` column also accepts `feed_url`. Duplicate URLs are skipped. The import
 ## Directory Structure
 
 ```
-cti_two/
+wraith/
 ├── .env.example
 ├── .gitignore
 ├── start.sh                        # setup / dev / migrate / stop / reset-db
@@ -249,7 +285,9 @@ cti_two/
 │   ├── alembic/
 │   │   └── versions/
 │   │       ├── 0001_initial_schema.py
-│   │       └── 0002_profile_match.py
+│   │       ├── 0002_profile_match.py
+│   │       ├── 0003_feedback_improvements.py   # upsert constraint, decay config
+│   │       └── 0004_feedback_reason_tags.py    # reason_tags JSON column
 │   ├── scripts/
 │   │   └── seed_sources.py         # seeds 10 CTI RSS feeds, idempotent
 │   └── app/
@@ -269,7 +307,7 @@ cti_two/
 │           ├── enrichment_prompt.py    # LLM call + Pydantic extraction
 │           ├── enrichment_runner.py    # batch orchestration, pause/resume
 │           ├── enrichment_schema.py    # EnrichmentResult model
-│           ├── scoring.py              # two-axis recommended score
+│           ├── scoring.py              # two-axis score with feedback decay + reason tags
 │           ├── bulletin.py             # daily bulletin build
 │           ├── rag.py                  # keyword RAG + LLM streaming for chat
 │           ├── ingest_runner.py        # fetch → scrape → dedup
@@ -286,7 +324,7 @@ cti_two/
     ├── package.json
     ├── vite.config.js
     └── src/
-        ├── App.jsx                 # router (5 routes)
+        ├── App.jsx                 # router (6 routes)
         ├── main.jsx
         ├── index.css
         ├── lib/
@@ -300,19 +338,20 @@ cti_two/
         │   ├── HighlightedText.jsx
         │   └── ui.jsx              # Button, Input, Card, Spinner, etc.
         └── pages/
-            ├── Bulletin.jsx        # daily bulletin, pagination
+            ├── Bulletin.jsx        # daily bulletin, pagination, reason-tag UI
+            ├── FeedbackHistory.jsx # feedback loop page (profile, NL input, signals)
             ├── ArticleDetail.jsx   # full article + inline-editable entities
             ├── IntelHub.jsx        # Articles / IOCs / CVEs / Actors tabs
             ├── Chat.jsx            # RAG chatbot
             ├── Login.jsx           # login form
-            └── Settings.jsx        # profile, sources, scoring, pipeline, storage
+            └── Settings.jsx        # sources, scoring, pipeline, storage, scheduler
 ```
 
 ---
 
 ## API Reference
 
-All routes are prefixed `/api`. All routes except `/health` and `/auth/login` require a `Authorization: Bearer <token>` header.
+All routes are prefixed `/api`. All routes except `/health` and `/auth/login` require an `Authorization: Bearer <token>` header.
 
 | Router | Key endpoints |
 |---|---|
@@ -323,11 +362,11 @@ All routes are prefixed `/api`. All routes except `/health` and `/auth/login` re
 | `/enrich` | `POST /run`, `POST /pause`, `POST /resume`, `GET /status`, `POST /articles/{id}` |
 | `/articles` | `GET /` (paginated + filtered), `GET /{id}` |
 | `/bulletin` | `GET /today`, `GET /{date}`, `GET /history`, `POST /build` |
-| `/feedback` | `POST /` (rate article), `PATCH /read-status/{id}` |
+| `/feedback` | `POST /` (rate), `PATCH /{id}/reasons` (reason tags), `PATCH /read-status/{id}`, `POST /summarize` (LLM summary), `POST /notes/apply` (NL → profile) |
 | `/search` | `GET /` (full-text), `GET /ioc`, `GET /actors`, `GET /tags` |
 | `/cve` | `GET /`, `GET /stats`, `GET /{cve_id}`, `POST /sync` |
 | `/chat` | `POST /` (SSE streaming), `GET /health` |
-| `/settings` | `GET|PATCH /scoring`, `GET|PATCH /profile`, `GET /scheduler`, `GET /feedback-signal`, `POST /prune` |
+| `/settings` | `GET\|PATCH /scoring`, `GET\|PATCH /profile`, `GET /scheduler`, `GET /feedback-signal`, `POST /prune` |
 
 ---
 
@@ -369,6 +408,8 @@ ENRICH_DELAY_SECONDS=1
 
 Ollama processes one inference at a time. The chat endpoint has a 120-second read timeout — if enrichment is running, chat requests queue behind it. Use the **Stop** button in the chat UI to cancel a waiting request.
 
+The LLM is also used for the **Preference Summary** and **Natural Language Feedback** features on the Feedback page. These are user-triggered and lightweight (single short prompts).
+
 ---
 
 ## Database Schema
@@ -381,8 +422,8 @@ sources ──< articles ──< iocs
                     ──< article_actors >── threat_actors
                     ──< cve_mentions  >── cve_records
                     ──< bulletin_items >── bulletins
-                    ──< feedback
-                    ──< read_status
+                    ──< feedback (rating, reason_tags)
+                    ──< read_status (unread/acknowledged/dismissed)
 
 scoring_config   (single row — editable via Settings)
 user_profile     (single row — your interest profile)

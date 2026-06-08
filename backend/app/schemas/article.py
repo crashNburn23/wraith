@@ -45,6 +45,7 @@ class ArticleListItem(BaseModel):
     threat_category: Optional[str]
     ai_severity_score: Optional[float]
     geo_origin: Optional[str]
+    sector_targets: Optional[list] = None
     created_at: datetime
     model_config = {"from_attributes": True}
 

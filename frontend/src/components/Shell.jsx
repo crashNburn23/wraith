@@ -26,6 +26,12 @@ const SettingsIcon = () => (
   </svg>
 );
 
+const FeedbackIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 15h2.25m8.024-9.75c.011.05.028.1.052.148.591 1.2.924 2.55.924 3.977a8.96 8.96 0 0 1-.999 4.125m.023-8.25c-.076-.365.183-.75.575-.75h.908c.889 0 1.713.518 1.972 1.368.339 1.11.521 2.287.521 3.507 0 1.553-.295 3.036-.831 4.398-.306.774-1.086 1.227-1.918 1.227h-1.053c-.472 0-.745-.556-.5-.96a8.95 8.95 0 0 0 .303-.54m.023-8.25H16.48a4.5 4.5 0 0 1-1.423-.23l-3.114-1.04a4.5 4.5 0 0 0-1.423-.23H6.504c-.618 0-1.217.247-1.605.729A11.95 11.95 0 0 0 3 12c0 .434.023.863.068 1.285C3.427 15.306 4.806 16.5 6.504 16.5h1.423l3.114 1.04a4.5 4.5 0 0 0 1.423.23h1.294M7.5 15H6" />
+  </svg>
+);
+
 const ShieldIcon = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
@@ -33,10 +39,11 @@ const ShieldIcon = () => (
 );
 
 const links = [
-  { to: "/",         label: "Bulletin",  Icon: BulletinIcon },
-  { to: "/intel",    label: "Intel Hub", Icon: IntelIcon    },
-  { to: "/chat",     label: "Chat",      Icon: ChatIcon     },
-  { to: "/settings", label: "Settings",  Icon: SettingsIcon },
+  { to: "/",          label: "Bulletin",  Icon: BulletinIcon  },
+  { to: "/intel",     label: "Intel Hub", Icon: IntelIcon     },
+  { to: "/chat",      label: "Chat",      Icon: ChatIcon      },
+  { to: "/feedback",  label: "Feedback",  Icon: FeedbackIcon  },
+  { to: "/settings",  label: "Settings",  Icon: SettingsIcon  },
 ];
 
 export default function Shell({ children }) {
