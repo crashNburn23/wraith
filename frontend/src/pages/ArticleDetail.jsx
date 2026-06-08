@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { articles as articlesApi, enrich } from "../lib/api";
+import { articles as articlesApi, enrich, feedback as feedbackApi } from "../lib/api";
 import { Button, Spinner, Input, Textarea } from "../components/ui";
 import { formatDate, categoryColor, severityBg } from "../lib/utils";
 import { useEntityModal } from "../components/EntityModalContext";
 import HighlightedText, { buildHighlights } from "../components/HighlightedText";
+import FeedbackButtons from "../components/FeedbackButtons";
 
 // Muted accent palette for entity sections
 const NEON = {
@@ -111,6 +112,11 @@ export default function ArticleDetail() {
     queryFn: () => articlesApi.get(id),
   });
 
+  const { data: feedbackData } = useQuery({
+    queryKey: ["article-feedback", id],
+    queryFn: () => feedbackApi.getForArticle(id),
+  });
+
   const reEnrich = useMutation({
     mutationFn: () => enrich.runSingle(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["article", id] }),
@@ -155,7 +161,17 @@ export default function ArticleDetail() {
       </div>
 
       {/* Title */}
-      <h1 className="text-2xl font-bold text-white mb-5 leading-snug">{article.title}</h1>
+      <h1 className="text-2xl font-bold text-white mb-3 leading-snug">{article.title}</h1>
+
+      {/* Feedback */}
+      <div className="mb-5">
+        <FeedbackButtons
+          articleId={id}
+          article={article}
+          initialRating={feedbackData?.rating ?? null}
+          initialReasonTags={[]}
+        />
+      </div>
 
       {/* AI Summary */}
       {article.ai_summary && (
