@@ -3,6 +3,28 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { sources as sourcesApi, ingest, enrich, bulletin as bulletinApi, settings as settingsApi, cve } from "../lib/api";
 import { Button, Input, Card, Spinner, Divider } from "../components/ui";
 
+function CollapsibleCard({ title, subtitle, defaultOpen = false, actions, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className="p-5">
+      <div className="flex items-start justify-between">
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="flex items-start gap-2 text-left group flex-1 min-w-0"
+        >
+          <span className="text-slate-600 text-xs mt-0.5 flex-shrink-0 transition-transform" style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-white group-hover:text-slate-200">{title}</h2>
+            {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+          </div>
+        </button>
+        {actions && <div className="flex-shrink-0 ml-3">{actions}</div>}
+      </div>
+      {open && <div className="mt-4">{children}</div>}
+    </Card>
+  );
+}
+
 // ─── Ingest Tracker ──────────────────────────────────────────────────────────
 
 function IngestTracker() {
@@ -256,20 +278,12 @@ function SchedulerSection() {
     refetchInterval: 60_000,
   });
 
-  return (
-    <Card className="p-5">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-base font-semibold text-white">Scheduler</h2>
-          <p className="text-xs text-slate-500 mt-0.5 font-mono">
-            {data?.running
-              ? <span className="text-emerald-400">● running</span>
-              : <span className="text-red-400">○ stopped</span>}
-          </p>
-        </div>
-        <span className="text-[10px] font-mono text-slate-600 uppercase tracking-widest">APScheduler</span>
-      </div>
+  const statusLabel = data?.running
+    ? <span className="text-emerald-400 font-mono text-xs">● running</span>
+    : <span className="text-red-400 font-mono text-xs">○ stopped</span>;
 
+  return (
+    <CollapsibleCard title="Scheduler" subtitle={null} actions={statusLabel}>
       {isLoading ? <Spinner /> : (
         <>
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -306,7 +320,7 @@ function SchedulerSection() {
           )}
         </>
       )}
-    </Card>
+    </CollapsibleCard>
   );
 }
 
@@ -326,13 +340,30 @@ function ControlsSection() {
       <EnrichTracker />
       <Divider />
 
-      <div className="flex gap-2">
-        <Button variant="secondary" size="sm" onClick={() => cveSyncMut.mutate()} disabled={cveSyncMut.isPending}>
-          {cveSyncMut.isPending ? <><Spinner size="sm" /> Syncing CVEs…</> : "Sync CVEs"}
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => bulletinMut.mutate()} disabled={bulletinMut.isPending}>
-          {bulletinMut.isPending ? <><Spinner size="sm" /> Building…</> : "Build Bulletin"}
-        </Button>
+      {/* CVE Sync */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-slate-300">Sync CVEs</h3>
+          <Button variant="secondary" size="sm" onClick={() => cveSyncMut.mutate()} disabled={cveSyncMut.isPending}>
+            {cveSyncMut.isPending ? <><Spinner size="sm" /> Syncing…</> : "Run Now"}
+          </Button>
+        </div>
+        {cveSyncMut.isSuccess && <p className="text-xs text-green-400 font-mono">CVE sync complete</p>}
+        {cveSyncMut.isError && <p className="text-xs text-red-400 font-mono">Sync failed</p>}
+      </div>
+
+      <Divider />
+
+      {/* Build Bulletin */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-slate-300">Build Bulletin</h3>
+          <Button variant="secondary" size="sm" onClick={() => bulletinMut.mutate()} disabled={bulletinMut.isPending}>
+            {bulletinMut.isPending ? <><Spinner size="sm" /> Building…</> : "Run Now"}
+          </Button>
+        </div>
+        {bulletinMut.isSuccess && <p className="text-xs text-green-400 font-mono">Bulletin built</p>}
+        {bulletinMut.isError && <p className="text-xs text-red-400 font-mono">Build failed</p>}
       </div>
     </Card>
   );
@@ -355,37 +386,28 @@ function SystemPromptSection() {
   };
 
   return (
-    <Card className="p-5">
-      <details>
-        <summary className="flex items-center justify-between cursor-pointer select-none list-none">
-          <div>
-            <h2 className="text-base font-semibold text-white">Enrichment System Prompt</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Exact prompt sent to {"{LLM}"} for every article — controls severity scoring, category, IOC/TTP extraction
-            </p>
-          </div>
-          <span className="text-slate-600 text-xs ml-4">▼ show</span>
-        </summary>
-
-        <div className="mt-4">
-          {isLoading ? <Spinner /> : (
-            <>
-              <div className="flex justify-end mb-1">
-                <button onClick={copy} className="text-xs text-slate-600 hover:text-slate-300">
-                  {copied ? "Copied ✓" : "Copy"}
-                </button>
-              </div>
-              <pre className="bg-navy-800 rounded p-4 text-xs text-slate-300 whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-96 overflow-y-auto font-mono">
-                {data?.prompt}
-              </pre>
-              <p className="text-xs text-slate-600 mt-2">
-                To customise severity scoring, edit <code className="text-slate-400">backend/app/services/enrichment_prompt.py</code> and restart the API.
-              </p>
-            </>
-          )}
-        </div>
-      </details>
-    </Card>
+    <CollapsibleCard
+      title="Enrichment System Prompt"
+      subtitle={`Exact prompt sent to the LLM for every article — controls severity scoring, category, IOC/TTP extraction`}
+      actions={
+        !isLoading && (
+          <button onClick={copy} className="text-xs text-slate-600 hover:text-slate-300">
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+        )
+      }
+    >
+      {isLoading ? <Spinner /> : (
+        <>
+          <pre className="bg-navy-800 rounded p-4 text-xs text-slate-300 whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-96 overflow-y-auto font-mono">
+            {data?.prompt}
+          </pre>
+          <p className="text-xs text-slate-600 mt-2">
+            To customise, edit <code className="text-slate-400">backend/app/services/enrichment_prompt.py</code> and restart the API.
+          </p>
+        </>
+      )}
+    </CollapsibleCard>
   );
 }
 
@@ -456,15 +478,11 @@ function ScoringSection() {
   const updateWeight = (key, val) => { setWeights(prev => ({ ...prev, [key]: val })); setDirty(true); setError(null); };
 
   return (
-    <Card className="p-5" id="scoring">
-      <div className="flex items-start justify-between mb-1">
-        <div>
-          <h2 className="text-base font-semibold text-white">Scoring Weights</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Controls how articles are ranked in the bulletin</p>
-        </div>
-        <Button size="sm" variant="ghost" onClick={() => resetMut.mutate()} disabled={resetMut.isPending}>Reset</Button>
-      </div>
-
+    <CollapsibleCard
+      title="Scoring Weights"
+      subtitle="Controls how articles are ranked in the bulletin"
+      actions={<Button size="sm" variant="ghost" onClick={() => resetMut.mutate()} disabled={resetMut.isPending}>Reset</Button>}
+    >
       <div className={`text-xs font-mono mb-4 ${sumOk ? "text-green-400" : "text-red-400"}`}>
         Total: {(total * 100).toFixed(1)}% {sumOk ? "✓" : "— must equal 100%"}
       </div>
@@ -517,7 +535,7 @@ function ScoringSection() {
         {dirty && <span className="text-xs text-yellow-400">Unsaved changes</span>}
         {saveMut.isSuccess && !dirty && <span className="text-xs text-green-400">Saved — rebuild bulletin to apply</span>}
       </div>
-    </Card>
+    </CollapsibleCard>
   );
 }
 
@@ -571,20 +589,19 @@ function SourcesSection() {
     e.target.value = "";
   };
 
-  return (
-    <Card className="p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold text-white">RSS Sources</h2>
-        <label className={`text-xs font-mono px-2 py-1 rounded border cursor-pointer transition-colors ${
-          importMut.isPending
-            ? "border-slate-700 text-slate-600 cursor-not-allowed"
-            : "border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200"
-        }`}>
-          {importMut.isPending ? "Importing…" : "Import CSV"}
-          <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvFile} disabled={importMut.isPending} />
-        </label>
-      </div>
+  const csvLabel = (
+    <label className={`text-xs font-mono px-2 py-1 rounded border cursor-pointer transition-colors ${
+      importMut.isPending
+        ? "border-slate-700 text-slate-600 cursor-not-allowed"
+        : "border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200"
+    }`}>
+      {importMut.isPending ? "Importing…" : "Import CSV"}
+      <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleCsvFile} disabled={importMut.isPending} />
+    </label>
+  );
 
+  return (
+    <CollapsibleCard title="RSS Sources" actions={csvLabel}>
       {importResult && (
         <div className="mb-4 text-xs font-mono bg-navy-900 border border-navy-border rounded px-3 py-2 space-y-1">
           <span className="text-green-400">+{importResult.added} added</span>
@@ -622,7 +639,7 @@ function SourcesSection() {
         </p>
       )}
       <p className="text-[10px] text-slate-600 font-mono mt-2">CSV format: name,url (header row required)</p>
-    </Card>
+    </CollapsibleCard>
   );
 }
 
@@ -636,18 +653,16 @@ function StorageSection() {
   });
 
   return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between mb-1">
-        <div>
-          <h2 className="text-base font-semibold text-white">Storage &amp; Retention</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Runs automatically every Sunday 03:00 UTC</p>
-        </div>
+    <CollapsibleCard
+      title="Storage & Retention"
+      subtitle="Runs automatically every Sunday 03:00 UTC"
+      actions={
         <Button size="sm" variant="secondary" onClick={() => pruneMut.mutate()} disabled={pruneMut.isPending}>
           {pruneMut.isPending ? <><Spinner size="sm" /> Pruning…</> : "Run Now"}
         </Button>
-      </div>
-
-      <div className="mt-3 space-y-1 text-xs text-slate-500 font-mono">
+      }
+    >
+      <div className="space-y-1 text-xs text-slate-500 font-mono">
         <div>• <span className="text-slate-400">scraped_text</span> nulled after 30 days (kept for article text view)</div>
         <div>• <span className="text-slate-400">error/no_text</span> articles deleted after 14 days</div>
         <div>• <span className="text-slate-400">pending</span> articles deleted after 30 days</div>
@@ -663,7 +678,7 @@ function StorageSection() {
           <div className="text-slate-400">old unbulleted deleted: {result.deleted_old_unbulleted}</div>
         </div>
       )}
-    </Card>
+    </CollapsibleCard>
   );
 }
 
