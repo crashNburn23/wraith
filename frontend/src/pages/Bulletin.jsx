@@ -46,23 +46,19 @@ function CyberScoreBadge({ score, expanded, onToggle }) {
       onClick={onToggle}
       title="Click to expand score breakdown"
       style={{
-        position: "absolute", top: 0, right: 0, width: 72,
-        display: "flex", flexDirection: "column", alignItems: "center",
-        padding: "10px 8px 11px",
+        position: "absolute", top: 8, right: 8,
+        width: 36, height: 36, borderRadius: "50%",
+        display: "flex", alignItems: "center", justifyContent: "center",
         fontFamily: "'JetBrains Mono','Fira Code',monospace",
+        fontSize: 13, fontWeight: 800,
         color: c.hex,
-        background: `linear-gradient(160deg,#03060d 0%,${c.dim} 100%)`,
-        borderLeft: `1px solid ${c.border}`, borderBottom: `1px solid ${c.border}`,
-        clipPath: "polygon(18px 0%,100% 0%,100% 100%,0% 100%,0% 18px)",
-        boxShadow: "inset 0 0 18px rgba(0,0,0,0.8)",
+        background: `radial-gradient(circle,${c.dim} 0%,#050c1a 100%)`,
+        border: `1px solid ${c.border}`,
+        boxShadow: `0 0 8px ${c.dim}, inset 0 0 6px rgba(0,0,0,0.6)`,
         cursor: "pointer", userSelect: "none", zIndex: 1,
       }}
     >
-      <span style={{ fontSize: 8, letterSpacing: "0.22em", opacity: 0.55, marginBottom: 3 }}>REC</span>
-      <span style={{ fontSize: 26, fontWeight: 800, lineHeight: 1 }}>{val}</span>
-      <span style={{ fontSize: 8, opacity: 0.35, marginTop: 2 }}>/100</span>
-      <span style={{ fontSize: 7, letterSpacing: "0.18em", opacity: 0.6, marginTop: 4 }}>{c.label}</span>
-      <span style={{ fontSize: 8, opacity: expanded ? 0.8 : 0.35, marginTop: 3 }}>{expanded ? "▲" : "▼"}</span>
+      {val}
     </button>
   );
 }
@@ -198,7 +194,7 @@ function BulletinCard({ item, onHide, dimmed = false }) {
     >
       <CyberScoreBadge score={score} expanded={expanded} onToggle={() => setExpanded(v => !v)} />
 
-      <div className="p-4" style={{ paddingRight: 84 }}>
+      <div className="p-4" style={{ paddingRight: 52 }}>
         <div className="flex items-start gap-3">
           {/* Rank + read */}
           <div className="flex flex-col items-center gap-1 flex-shrink-0 w-7 pt-0.5">
@@ -209,28 +205,51 @@ function BulletinCard({ item, onHide, dimmed = false }) {
           </div>
 
           <div className="flex-1 min-w-0">
-            {/* Meta */}
-            <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-              {article.threat_category && (
-                <span className={`text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded ${categoryColor(article.threat_category)}`}>
-                  {article.threat_category}
-                </span>
+            {/* Meta + thumbnail row */}
+            <div className="flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                {/* Meta */}
+                <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                  {article.threat_category && (
+                    <span className={`text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded ${categoryColor(article.threat_category)}`}>
+                      {article.threat_category}
+                    </span>
+                  )}
+                  {article.ai_severity_score != null && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${severityBg(article.ai_severity_score)}`}>
+                      sev {article.ai_severity_score.toFixed(0)}
+                    </span>
+                  )}
+                  <span className="text-[11px] text-slate-600">{timeAgo(article.published_at)}</span>
+                </div>
+
+                {/* Title */}
+                <Link to={`/articles/${article.id}`} className="text-sm font-medium text-slate-200 hover:text-white leading-snug line-clamp-2 block">
+                  {article.title}
+                </Link>
+              </div>
+
+              {/* Thumbnail */}
+              {article.og_image && (
+                <a href={article.url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 mt-0.5">
+                  <img
+                    src={article.og_image}
+                    alt=""
+                    onError={e => { e.currentTarget.style.display = "none"; }}
+                    style={{
+                      width: 80, height: 52,
+                      objectFit: "cover",
+                      borderRadius: 6,
+                      opacity: 0.82,
+                      border: `1px solid ${c.border}`,
+                    }}
+                  />
+                </a>
               )}
-              {article.ai_severity_score != null && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${severityBg(article.ai_severity_score)}`}>
-                  sev {article.ai_severity_score.toFixed(0)}
-                </span>
-              )}
-              <span className="text-[11px] text-slate-600">{timeAgo(article.published_at)}</span>
             </div>
 
-            {/* Title */}
-            <Link to={`/articles/${article.id}`} className="text-sm font-medium text-slate-200 hover:text-white leading-snug line-clamp-2 block mb-2">
-              {article.title}
-            </Link>
-
             {/* Actions row */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 mt-2">
               <FeedbackButtons articleId={article.id} article={article} initialRating={user_rating} initialReasonTags={user_reason_tags} />
               <a href={article.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-600 hover:text-brand-400">
                 source ↗

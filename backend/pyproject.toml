@@ -39,6 +39,7 @@ dependencies = [
 
     # Auth
     "PyJWT>=2.8",
+    "bcrypt>=4.0",
 ]
 
 [project.optional-dependencies]

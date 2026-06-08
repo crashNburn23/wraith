@@ -12,7 +12,7 @@ No cloud dependencies by default. No embeddings. Runs entirely on localhost.
 
 ## Features
 
-- **Daily Bulletin** — enriched articles ranked by a two-axis recommended score (threat severity + personal relevance). Paginated, filterable, dismissable.
+- **Daily Bulletin** — enriched articles ranked by a two-axis recommended score (threat severity + personal relevance). Paginated, filterable, dismissable. Article thumbnails extracted from RSS feeds and article OG images display Google News-style next to each card.
 - **Interest Profile** — declare your sectors, threat actors, categories, and keywords. The profile match component scores every article against your profile from day one, no ratings required.
 - **Feedback loop** — 👍/👎 on any article feeds into the relevance score. After ≥3 signals the loop activates; a cold-start banner on the bulletin shows progress. Feedback decays exponentially with a configurable half-life so recent signals carry more weight.
 - **Reason tags** — attach a reason to any 👎 to make the penalty surgical. Feature tags (`not my area`, `not my sector`) limit the penalty to the tagged dimension only. Quality tags (`too vague`, `not actionable`) dampen the signal instead of removing it.
@@ -22,7 +22,7 @@ No cloud dependencies by default. No embeddings. Runs entirely on localhost.
 - **Intel Hub** — searchable, filterable views across Articles, IOCs, CVEs, and Actors.
 - **CVE tracking** — CVSS, EPSS, and CISA KEV data for every CVE mentioned in your articles.
 - **RAG Chat** — ask questions about your intel database; retrieval is keyword-based over enriched articles, IOCs, CVEs, and actors.
-- **Score transparency** — every bulletin card shows a full drill-down: threat axis (AI severity + KEV bonus) and relevance axis (profile match + feedback signal + recency), with per-component bars and contributing articles.
+- **Score transparency** — every bulletin card shows a compact score bubble (0–100) in the tier color. Click it to expand the full drill-down: threat axis (AI severity + KEV bonus) and relevance axis (profile match + feedback signal + recency), with per-component bars and contributing articles.
 - **RSS management** — add feeds manually or import a CSV. Toggle active/inactive, see failure counts.
 - **Data retention** — automated weekly pruning keeps the DB lean.
 
@@ -287,7 +287,8 @@ wraith/
 │   │       ├── 0001_initial_schema.py
 │   │       ├── 0002_profile_match.py
 │   │       ├── 0003_feedback_improvements.py   # upsert constraint, decay config
-│   │       └── 0004_feedback_reason_tags.py    # reason_tags JSON column
+│   │       ├── 0004_feedback_reason_tags.py    # reason_tags JSON column
+│   │       └── 0005_article_og_image.py        # og_image column on articles
 │   ├── scripts/
 │   │   └── seed_sources.py         # seeds 10 CTI RSS feeds, idempotent
 │   └── app/
@@ -311,8 +312,8 @@ wraith/
 │           ├── bulletin.py             # daily bulletin build
 │           ├── rag.py                  # keyword RAG + LLM streaming for chat
 │           ├── ingest_runner.py        # fetch → scrape → dedup
-│           ├── feed_fetcher.py
-│           ├── scraper.py              # full-text via trafilatura
+│           ├── feed_fetcher.py         # RSS parsing + media/enclosure image extraction
+│           ├── scraper.py              # full-text via trafilatura + og:image extraction
 │           ├── dedup.py                # SHA-256 URL dedup
 │           ├── cve_enrichment.py       # NVD + EPSS + KEV per article CVE
 │           ├── pruning.py              # data retention policy

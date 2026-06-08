@@ -18,6 +18,9 @@ class Article(Base, TimestampMixin):
     enrichment_status: Mapped[str] = mapped_column(String(50), default="pending")
     enriched_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Feed-extracted metadata
+    og_image: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # LLM-extracted fields
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     threat_category: Mapped[str | None] = mapped_column(String(100), nullable=True)

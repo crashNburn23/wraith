@@ -40,7 +40,7 @@ async def run_ingest(db: Session) -> dict:
                 run.processed += 1
                 continue
 
-            text = await fetch_full_text(raw_url)
+            text, scraped_og = await fetch_full_text(raw_url)
             article = Article(
                 source_id=source.id,
                 url=normalise_url(raw_url),
@@ -48,6 +48,7 @@ async def run_ingest(db: Session) -> dict:
                 title=item["title"],
                 published_at=item["published_at"],
                 scraped_text=text,
+                og_image=item.get("og_image") or scraped_og,
                 enrichment_status="pending" if text else "no_text",
             )
             db.add(article)

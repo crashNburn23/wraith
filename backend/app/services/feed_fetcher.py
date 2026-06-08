@@ -39,5 +39,19 @@ async def fetch_feed(url: str, timeout: int = 20) -> list[dict]:
             "url": entry.get("link") or entry.get("id", ""),
             "title": entry.get("title", "Untitled"),
             "published_at": _to_utc(entry.get("published_parsed") or entry.get("updated_parsed")),
+            "og_image": _extract_image(entry),
         })
     return items
+
+
+def _extract_image(entry) -> str | None:
+    for thumb in (entry.get("media_thumbnail") or []):
+        if thumb.get("url"):
+            return thumb["url"]
+    for mc in (entry.get("media_content") or []):
+        if mc.get("url") and "image" in mc.get("type", ""):
+            return mc["url"]
+    for link in (entry.get("links") or []):
+        if link.get("rel") == "enclosure" and "image" in link.get("type", "") and link.get("href"):
+            return link["href"]
+    return None
