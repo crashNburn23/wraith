@@ -5,6 +5,7 @@ from typing import Optional
 class IOCItem(BaseModel):
     ioc_type: str   # ip, domain, hash, url, email
     value: str
+    ioc_confidence: str = Field(default="high")  # high, medium, low
 
 
 class TTPItem(BaseModel):

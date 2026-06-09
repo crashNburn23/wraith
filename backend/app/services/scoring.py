@@ -99,6 +99,7 @@ def _feedback_signal(
     target_ttps = {t.technique_id for t in article.ttp_tags}
     target_actors = {aa.actor_id for aa in article.article_actors}
     target_sectors = set(article.sector_targets or [])
+    target_geo = {g.lower() for g in (article.geo_targets or [])}
 
     contributors = []
     weighted_sum = 0.0
@@ -110,6 +111,7 @@ def _feedback_signal(
         "wrong_sector":   lambda r: r == "shared_sector",
         "wrong_actor":    lambda r: r == "shared_actor",
         "wrong_ttp":      lambda r: r.startswith("ttp:"),
+        "wrong_geo":      lambda r: r == "shared_geo",
     }
 
     for past in past_articles:
@@ -131,6 +133,10 @@ def _feedback_signal(
         past_sectors = set(past.sector_targets or [])
         if target_sectors & past_sectors:
             overlap_reasons.append("shared_sector")
+
+        past_geo = {g.lower() for g in (past.geo_targets or [])}
+        if target_geo & past_geo:
+            overlap_reasons.append("shared_geo")
 
         if not overlap_reasons:
             continue
@@ -221,6 +227,18 @@ def _profile_match(article: Article, profile: UserProfile) -> float:
         text = f"{article.title} {article.ai_summary or ''}".lower()
         hits = sum(1 for kw in p_kw if kw in text)
         scores.append(min(hits / len(p_kw), 1.0))
+
+    # Geo targets — regions the user cares about being targeted
+    p_geo_targets = {g.lower() for g in (profile.geo_targets or [])}
+    if p_geo_targets:
+        a_geo = {g.lower() for g in (article.geo_targets or [])}
+        scores.append(min(len(a_geo & p_geo_targets) / len(p_geo_targets), 1.0))
+
+    # Geo origins — threat actor origins the user wants to track
+    p_geo_origins = {g.lower() for g in (profile.geo_origins or [])}
+    if p_geo_origins:
+        a_origin = (article.geo_origin or "").lower()
+        scores.append(1.0 if a_origin in p_geo_origins else 0.0)
 
     return round(sum(scores) / len(scores), 4) if scores else 0.0
 

@@ -194,43 +194,38 @@ class UserProfileUpdate(BaseModel):
     threat_actors: Optional[list[str]] = None
     categories: Optional[list[str]] = None
     keywords: Optional[list[str]] = None
+    geo_targets: Optional[list[str]] = None
+    geo_origins: Optional[list[str]] = None
 
 
-@router.get("/profile")
-def get_profile(db: Session = Depends(get_db)):
-    p = _get_profile(db)
+def _profile_to_dict(p) -> dict:
     return {
         "sectors":       p.sectors or [],
         "threat_actors": p.threat_actors or [],
         "categories":    p.categories or [],
         "keywords":      p.keywords or [],
+        "geo_targets":   p.geo_targets or [],
+        "geo_origins":   p.geo_origins or [],
     }
+
+
+@router.get("/profile")
+def get_profile(db: Session = Depends(get_db)):
+    return _profile_to_dict(_get_profile(db))
 
 
 @router.patch("/profile")
 def update_profile(body: UserProfileUpdate, db: Session = Depends(get_db)):
     from sqlalchemy.orm.attributes import flag_modified
     p = _get_profile(db)
-    if body.sectors is not None:
-        p.sectors = body.sectors
-        flag_modified(p, "sectors")
-    if body.threat_actors is not None:
-        p.threat_actors = body.threat_actors
-        flag_modified(p, "threat_actors")
-    if body.categories is not None:
-        p.categories = body.categories
-        flag_modified(p, "categories")
-    if body.keywords is not None:
-        p.keywords = body.keywords
-        flag_modified(p, "keywords")
+    for field in ("sectors", "threat_actors", "categories", "keywords", "geo_targets", "geo_origins"):
+        val = getattr(body, field)
+        if val is not None:
+            setattr(p, field, val)
+            flag_modified(p, field)
     db.commit()
     db.refresh(p)
-    return {
-        "sectors":       p.sectors or [],
-        "threat_actors": p.threat_actors or [],
-        "categories":    p.categories or [],
-        "keywords":      p.keywords or [],
-    }
+    return _profile_to_dict(p)
 
 
 @router.post("/prune")

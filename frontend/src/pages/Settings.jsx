@@ -3,6 +3,39 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { sources as sourcesApi, ingest, enrich, bulletin as bulletinApi, settings as settingsApi, cve } from "../lib/api";
 import { Button, Input, Card, Spinner, Divider } from "../components/ui";
 
+function TagInput({ tags, onChange, placeholder }) {
+  const [input, setInput] = useState("");
+
+  const add = () => {
+    const v = input.trim();
+    if (v && !tags.includes(v)) onChange([...tags, v]);
+    setInput("");
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {tags.map(t => (
+          <span key={t} className="flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-navy-800 border border-navy-border text-slate-300">
+            {t}
+            <button onClick={() => onChange(tags.filter(x => x !== t))} className="text-slate-600 hover:text-red-400 leading-none">×</button>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <Input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          placeholder={placeholder}
+          className="flex-1 text-sm"
+        />
+        <Button size="sm" variant="secondary" onClick={add} disabled={!input.trim()}>Add</Button>
+      </div>
+    </div>
+  );
+}
+
 function CollapsibleCard({ title, subtitle, defaultOpen = false, actions, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -411,6 +444,91 @@ function SystemPromptSection() {
   );
 }
 
+// ─── Interest Profile ─────────────────────────────────────────────────────────
+
+const PRESET_SECTORS = ["Finance", "Healthcare", "Government", "Energy", "Technology", "Retail", "Education", "Defense", "Critical Infrastructure"];
+const PRESET_CATEGORIES = ["Malware", "Ransomware", "APT", "Phishing", "Vulnerability", "Data Breach", "Supply Chain", "DDoS", "Insider Threat"];
+
+function ProfileSection() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["profile"], queryFn: settingsApi.getProfile });
+
+  const [profile, setProfile] = useState(null);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (data && !dirty) setProfile(data);
+  }, [data, dirty]);
+
+  const saveMut = useMutation({
+    mutationFn: (body) => settingsApi.updateProfile(body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["profile"] }); setDirty(false); },
+  });
+
+  if (isLoading || !profile) return <Card className="p-5"><Spinner /></Card>;
+
+  const update = (field, value) => { setProfile(p => ({ ...p, [field]: value })); setDirty(true); };
+
+  const FIELDS = [
+    { key: "sectors",      label: "Sectors",         placeholder: "e.g. Finance", presets: PRESET_SECTORS,
+      hint: "Articles targeting these sectors score higher" },
+    { key: "categories",   label: "Threat Categories", placeholder: "e.g. Ransomware", presets: PRESET_CATEGORIES,
+      hint: "Boost articles matching these threat types" },
+    { key: "threat_actors", label: "Threat Actors",   placeholder: "e.g. APT28",
+      hint: "Boost articles mentioning these actors" },
+    { key: "keywords",     label: "Keywords",         placeholder: "e.g. zero-day",
+      hint: "Matched against title and summary" },
+    { key: "geo_targets",  label: "Geo Targets",      placeholder: "e.g. US, EU",
+      hint: "Boost articles where your regions are targeted" },
+    { key: "geo_origins",  label: "Threat Origins",   placeholder: "e.g. China, Russia",
+      hint: "Boost articles originating from tracked adversary nations" },
+  ];
+
+  return (
+    <CollapsibleCard title="Interest Profile" subtitle="Shapes relevance scoring — what you care about surfaces higher in the bulletin">
+      <div className="space-y-5">
+        {FIELDS.map(({ key, label, placeholder, presets, hint }) => (
+          <div key={key}>
+            <div className="flex items-baseline gap-2 mb-1.5">
+              <span className="text-sm text-slate-300 font-medium">{label}</span>
+              <span className="text-[11px] text-slate-600">{hint}</span>
+            </div>
+            {presets && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {presets.map(p => {
+                  const active = (profile[key] || []).includes(p);
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => update(key, active ? profile[key].filter(x => x !== p) : [...(profile[key] || []), p])}
+                      className={`text-[10px] px-2 py-0.5 rounded font-mono border transition-colors ${active ? "bg-brand-500/20 border-brand-500/50 text-brand-300" : "border-navy-border text-slate-600 hover:border-slate-500 hover:text-slate-400"}`}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <TagInput
+              tags={profile[key] || []}
+              onChange={v => update(key, v)}
+              placeholder={placeholder}
+            />
+          </div>
+        ))}
+      </div>
+      <Divider />
+      <div className="flex gap-2 items-center">
+        <Button onClick={() => saveMut.mutate(profile)} disabled={!dirty || saveMut.isPending}>
+          {saveMut.isPending ? <><Spinner size="sm" /> Saving…</> : "Save Profile"}
+        </Button>
+        {dirty && <span className="text-xs text-yellow-400">Unsaved changes</span>}
+        {saveMut.isSuccess && !dirty && <span className="text-xs text-green-400">Saved — rebuild bulletin to apply</span>}
+      </div>
+    </CollapsibleCard>
+  );
+}
+
 // ─── Scoring Weights ──────────────────────────────────────────────────────────
 
 function WeightSlider({ label, description, value, onChange }) {
@@ -689,6 +807,7 @@ export default function Settings() {
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
       <h1 className="text-xl font-bold text-white">Settings</h1>
       <ControlsSection />
+      <ProfileSection />
       <ScoringSection />
       <SystemPromptSection />
       <SourcesSection />

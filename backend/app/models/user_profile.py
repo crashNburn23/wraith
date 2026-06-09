@@ -11,3 +11,5 @@ class UserProfile(Base, TimestampMixin):
     threat_actors: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     categories: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     keywords: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
+    geo_targets: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
+    geo_origins: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
