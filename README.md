@@ -8,6 +8,14 @@ No cloud required. Runs entirely on localhost against a local Ollama model.
 
 ---
 
+![Daily Bulletin](docs/screenshots/bulletin.png)
+
+![Article Detail](docs/screenshots/article_detail.png)
+
+![Intel Hub](docs/screenshots/intel_hub.png)
+
+---
+
 ## What it does
 
 - **Daily Bulletin** — articles ranked by a combined threat severity + personal relevance score. Thumbnails pulled from feed media or article OG images. Paginated, filterable, dismissable.

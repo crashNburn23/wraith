@@ -288,12 +288,20 @@ export default function Bulletin() {
   const [showHidden, setShowHidden] = useState(false);
   const [page, setPage] = useState(0);
   const autoBuilt = useRef(false);
+  const [waitingForBrief, setWaitingForBrief] = useState(false);
+  const prevBriefGenAt = useRef(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["bulletin-today"],
     queryFn: bulletinApi.today,
-    refetchInterval: 60_000,
+    refetchInterval: waitingForBrief ? 3_000 : 60_000,
   });
+
+  useEffect(() => {
+    if (waitingForBrief && data?.brief_generated_at && data.brief_generated_at !== prevBriefGenAt.current) {
+      setWaitingForBrief(false);
+    }
+  }, [data?.brief_generated_at, waitingForBrief]);
 
   const { data: fbSignal } = useQuery({
     queryKey: ["feedback-signal"],
@@ -311,7 +319,8 @@ export default function Bulletin() {
   const briefMut = useMutation({
     mutationFn: bulletinApi.generateBrief,
     onSuccess: () => {
-      setTimeout(() => qc.invalidateQueries({ queryKey: ["bulletin-today"] }), 4000);
+      prevBriefGenAt.current = data?.brief_generated_at ?? null;
+      setWaitingForBrief(true);
     },
   });
 
