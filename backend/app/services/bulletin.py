@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import datetime, timezone, date
 from sqlalchemy.orm import Session
@@ -53,12 +52,4 @@ def build_bulletin(db: Session, for_date: date | None = None) -> Bulletin:
     db.commit()
     db.refresh(bulletin)
     logger.info("Built bulletin %s with %d items", date_str, len(scored))
-
-    # Auto-generate the daily brief after scoring
-    try:
-        from app.services.brief import generate_brief
-        asyncio.run(generate_brief(db, for_date))
-    except Exception as e:
-        logger.warning("Brief auto-generation failed after bulletin build: %s", e)
-
     return bulletin

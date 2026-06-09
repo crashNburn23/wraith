@@ -122,9 +122,11 @@ def get_bulletin(bulletin_date: str, db: Session = Depends(get_db)):
 @router.post("/build")
 async def build_bulletin(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     from app.services.bulletin import build_bulletin as _build
+    from app.services.brief import generate_brief
 
     async def _run():
         _build(db)
+        await generate_brief(db)
 
     background_tasks.add_task(_run)
     return {"status": "started"}
