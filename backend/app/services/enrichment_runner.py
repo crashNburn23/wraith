@@ -3,10 +3,13 @@ import logging
 import re
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from app.models import Article, IOC, TTPTag, ThreatActor, ArticleActor, CVEMention
+from app.models import Article, IOC, TTPTag, ThreatActor, ArticleActor, CVEMention, IOCWhitelist
 from app.services.enrichment_prompt import enrich_article
 from app.services import job_state
 from app.core.config import settings
+
+# Module-level whitelist cache — loaded at the start of each batch run
+_whitelist: set[str] = set()
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +28,30 @@ _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
 
 # Well-known legitimate domains that should never be treated as malicious IOCs
 _BENIGN_DOMAINS = {
-    "github.com", "microsoft.com", "google.com", "amazonaws.com", "apple.com",
-    "proofpoint.com", "safebreach.com", "virustotal.com", "shodan.io",
-    "bbc.co.uk", "cisa.gov", "nist.gov", "nvd.nist.gov", "exploit-db.com",
-    "bleepingcomputer.com", "theregister.com", "techcrunch.com", "wired.com",
+    # Security vendors / research
+    "github.com", "virustotal.com", "shodan.io", "any.run", "hybrid-analysis.com",
+    "urlscan.io", "abuse.ch", "app.any.run", "tria.ge", "bazaar.abuse.ch",
+    "malwarebazaar.abuse.ch", "threatfox.abuse.ch", "feodotracker.abuse.ch",
+    "proofpoint.com", "safebreach.com", "crowdstrike.com", "mandiant.com",
+    "recordedfuture.com", "team-cymru.com", "shadowserver.org",
+    "talosintelligence.com", "talos.com", "unit42.paloaltonetworks.com",
+    "paloaltonetworks.com", "checkpoint.com", "sentinelone.com",
+    "secureworks.com", "fireeye.com", "huntress.com",
+    # Cloud/infra
+    "amazonaws.com", "azure.com", "cloudflare.com", "fastly.com",
+    "akamai.com", "digitalocean.com", "linode.com",
+    # Microsoft / Apple / Google / Amazon
+    "microsoft.com", "windows.com", "office.com", "live.com",
+    "google.com", "googleapis.com", "gstatic.com", "youtube.com",
+    "apple.com", "icloud.com", "amazon.com", "aws.amazon.com",
+    # Government / standards
+    "cisa.gov", "nist.gov", "nvd.nist.gov", "us-cert.gov", "cve.org",
+    "mitre.org", "attack.mitre.org",
+    # News / reference
+    "exploit-db.com", "bleepingcomputer.com", "theregister.com",
+    "techcrunch.com", "wired.com", "darkreading.com", "securityweek.com",
+    "bbc.co.uk", "reuters.com", "krebsonsecurity.com", "arstechnica.com",
+    # Test/generic
     "example.com", "test.com", "localhost",
 }
 
@@ -75,11 +98,21 @@ def _validate_ioc(ioc_type: str, value: str) -> bool:
 
 
 def _get_or_create_actor(db: Session, name: str) -> ThreatActor:
+    name = name.strip()
+    name_lower = name.lower()
+    # Exact name match
     actor = db.query(ThreatActor).filter(ThreatActor.name == name).first()
-    if not actor:
-        actor = ThreatActor(name=name)
-        db.add(actor)
-        db.flush()
+    if actor:
+        return actor
+    # Case-insensitive name match or alias match
+    for a in db.query(ThreatActor).all():
+        if a.name.lower() == name_lower:
+            return a
+        if a.aliases and any(alias.lower() == name_lower for alias in a.aliases):
+            return a
+    actor = ThreatActor(name=name)
+    db.add(actor)
+    db.flush()
     return actor
 
 
@@ -110,6 +143,9 @@ async def enrich_one(db: Session, article: Article) -> bool:
     for ioc in result.iocs:
         if ioc.ioc_confidence == "low":
             continue
+        if ioc.value in _whitelist:
+            logger.debug("Skipped whitelisted IOC [%s] %r", ioc.ioc_type, ioc.value[:60])
+            continue
         if not _validate_ioc(ioc.ioc_type, ioc.value):
             logger.debug("Rejected IOC [%s] %r (confidence=%s)", ioc.ioc_type, ioc.value[:60], ioc.ioc_confidence)
             continue
@@ -138,6 +174,9 @@ async def enrich_one(db: Session, article: Article) -> bool:
 
 
 async def run_enrich_batch(db: Session) -> dict:
+    global _whitelist
+    _whitelist = {row.value for row in db.query(IOCWhitelist).all()}
+
     pending = (
         db.query(Article)
         .filter(Article.enrichment_status == "pending")
@@ -145,10 +184,16 @@ async def run_enrich_batch(db: Session) -> dict:
     )
 
     run = job_state.start_run("enrich", total=len(pending))
-    # Clear pause flag when a fresh run starts
+    # Clear control flags when a fresh run starts
     job_state.set_paused("enrich", False)
+    job_state.set_stopped("enrich", False)
 
     for article in pending:
+        if job_state.is_stopped("enrich"):
+            logger.info("Enrichment stopped after %d/%d articles", run.processed, run.total)
+            job_state.finish_run(run, status="stopped")
+            return run.to_dict()
+
         # Check pause flag before each article
         if job_state.is_paused("enrich"):
             logger.info("Enrichment paused after %d/%d articles", run.processed, run.total)

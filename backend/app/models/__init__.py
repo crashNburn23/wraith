@@ -5,6 +5,7 @@ from app.models.bulletin import Bulletin, BulletinItem
 from app.models.feedback import Feedback, ReadStatus
 from app.models.scoring_config import ScoringConfig
 from app.models.user_profile import UserProfile
+from app.models.whitelist import IOCWhitelist
 
 __all__ = [
     "Source", "Article",
@@ -12,4 +13,5 @@ __all__ = [
     "Bulletin", "BulletinItem",
     "Feedback", "ReadStatus",
     "ScoringConfig", "UserProfile",
+    "IOCWhitelist",
 ]

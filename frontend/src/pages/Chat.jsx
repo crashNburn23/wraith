@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Button, Spinner } from "../components/ui";
-import api from "../lib/api";
+import { getToken } from "../lib/auth";
 
 function Message({ role, content }) {
   return (
@@ -22,8 +22,15 @@ const SUGGESTIONS = [
   "What IOCs are associated with Lazarus Group?",
 ];
 
+const SESSION_KEY = "cti-chat-history";
+
+function loadHistory() {
+  try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "[]"); }
+  catch { return []; }
+}
+
 export default function Chat() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(loadHistory);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState(null);
@@ -32,6 +39,10 @@ export default function Chat() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  useEffect(() => {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(messages.slice(-100)));
   }, [messages]);
 
   const send = async () => {
@@ -47,9 +58,13 @@ export default function Chat() {
     abortRef.current = controller;
 
     try {
+      const token = getToken();
       const resp = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ messages: newHistory }),
         signal: controller.signal,
       });
@@ -103,9 +118,19 @@ export default function Chat() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-navy-border">
-        <h1 className="text-lg font-semibold text-white">CTI Chat</h1>
-        <p className="text-xs text-slate-500 mt-0.5">Ask about threats, IOCs, CVEs, or actors in your intel database</p>
+      <div className="px-6 py-4 border-b border-navy-border flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-white">CTI Chat</h1>
+          <p className="text-xs text-slate-500 mt-0.5">Ask about threats, IOCs, CVEs, or actors in your intel database</p>
+        </div>
+        {messages.length > 0 && (
+          <button
+            onClick={() => { setMessages([]); sessionStorage.removeItem(SESSION_KEY); }}
+            className="text-[11px] font-mono text-slate-600 hover:text-slate-400 transition-colors"
+          >
+            [clear]
+          </button>
+        )}
       </div>
 
       {/* Messages */}

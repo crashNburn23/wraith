@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { search, cve as cveApi } from "../lib/api";
+import { search, cve as cveApi, enrich as enrichApi } from "../lib/api";
 import { Input, Select, Tabs, Spinner, Badge } from "../components/ui";
-import { formatDate, categoryColor, severityBg } from "../lib/utils";
+import { formatDate, timeAgo, categoryColor, severityBg } from "../lib/utils";
 import { useEntityModal } from "../components/EntityModalContext";
 
 const TABS = [
@@ -103,10 +103,20 @@ function IOCsTab() {
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const { open } = useEntityModal();
+  const qc = useQueryClient();
+
   const { data, isLoading } = useQuery({
     queryKey: ["search-ioc", q, typeFilter],
     queryFn: () => search.ioc(q, typeFilter),
     placeholderData: (prev) => prev,
+  });
+
+  const whitelistMutation = useMutation({
+    mutationFn: async ({ ioc }) => {
+      await enrichApi.addToWhitelist(ioc.value, ioc.ioc_type);
+      await enrichApi.patchEntity("ioc", ioc.id, { delete: true });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["search-ioc"] }),
   });
 
   return (
@@ -148,12 +158,25 @@ function IOCsTab() {
             >
               {ioc.value}
             </button>
+            {ioc.created_at && (
+              <span className="text-[10px] text-slate-600 font-mono flex-shrink-0 hidden group-hover:inline" title={new Date(ioc.created_at).toLocaleString()}>
+                {timeAgo(ioc.created_at)}
+              </span>
+            )}
             <Link
               to={`/articles/${ioc.article_id}`}
               className="text-[11px] text-slate-600 hover:text-brand-400 flex-shrink-0 opacity-0 group-hover:opacity-100 font-mono"
             >
               article →
             </Link>
+            <button
+              onClick={() => whitelistMutation.mutate({ ioc })}
+              disabled={whitelistMutation.isPending}
+              title="Whitelist: remove this IOC and never tag it again"
+              className="text-[11px] text-slate-600 hover:text-yellow-400 flex-shrink-0 opacity-0 group-hover:opacity-100 font-mono transition-colors disabled:opacity-30"
+            >
+              [whitelist]
+            </button>
           </div>
         ))}
       </div>
@@ -230,30 +253,52 @@ function CVEsTab() {
 function ActorsTab() {
   const [q, setQ] = useState("");
   const { open } = useEntityModal();
+  const qc = useQueryClient();
 
   const { data: actors, isLoading } = useQuery({
     queryKey: ["actors", q],
     queryFn: () => search.actors(q),
   });
 
+  const cleanupMut = useMutation({
+    mutationFn: search.cleanupActors,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["actors"] }),
+  });
+
   return (
     <div className="p-5">
-      <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search actors…" className="w-full mb-3" />
+      <div className="flex gap-2 mb-3">
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search actors…" className="flex-1" />
+        <button
+          onClick={() => cleanupMut.mutate()}
+          disabled={cleanupMut.isPending}
+          title="Remove actors with no article associations"
+          className="text-[11px] font-mono px-2.5 py-1 rounded border border-slate-600/30 text-slate-600 hover:text-slate-300 hover:border-slate-500/50 transition-colors disabled:opacity-30 flex-shrink-0"
+        >
+          {cleanupMut.isPending ? "…" : cleanupMut.data ? `removed ${cleanupMut.data.removed}` : "clean orphans"}
+        </button>
+      </div>
       {isLoading ? <Spinner /> : (
         <div className="space-y-0.5">
           {(actors || []).map(a => (
             <button
               key={a.id}
               onClick={() => open("actor", a.id, a.name)}
-              className="w-full text-left px-3 py-2 rounded-lg text-sm transition-all hover:bg-navy-800 text-slate-300 border border-transparent"
+              className="w-full text-left px-3 py-2 rounded-lg text-sm transition-all hover:bg-navy-800 text-slate-300 border border-transparent flex items-center gap-2"
               style={{ borderLeft: "2px solid rgba(119,34,170,0.18)" }}
               onMouseEnter={e => e.currentTarget.style.borderLeftColor = "rgba(119,34,170,0.55)"}
               onMouseLeave={e => e.currentTarget.style.borderLeftColor = "rgba(119,34,170,0.18)"}
             >
-              {a.name}
-              {a.aliases?.length > 0 && (
-                <span className="text-[11px] text-slate-500 ml-1.5 font-mono">{a.aliases.slice(0, 2).join(", ")}</span>
-              )}
+              <span className="flex-1 text-left min-w-0">
+                {a.name}
+                {a.aliases?.length > 0 && (
+                  <span className="text-[11px] text-slate-500 ml-1.5 font-mono">{a.aliases.slice(0, 2).join(", ")}</span>
+                )}
+              </span>
+              <span className="flex-shrink-0 flex items-center gap-2 text-[10px] font-mono text-slate-600">
+                {a.article_count > 0 && <span className="text-slate-500">{a.article_count} article{a.article_count !== 1 ? "s" : ""}</span>}
+                {a.last_seen && <span title={new Date(a.last_seen).toLocaleDateString()}>{timeAgo(a.last_seen)}</span>}
+              </span>
             </button>
           ))}
         </div>

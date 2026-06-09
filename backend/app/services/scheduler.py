@@ -1,6 +1,7 @@
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.core.config import settings
+from app.services import job_state
 
 logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
@@ -24,6 +25,10 @@ def start_scheduler(app) -> None:
     scheduler = get_scheduler()
 
     async def _ingest():
+        run = job_state.get_run("ingest")
+        if run and run.status == "running":
+            logger.info("Skipping scheduled ingest — already running")
+            return
         db = SessionLocal()
         try:
             await run_ingest(db)
@@ -31,6 +36,10 @@ def start_scheduler(app) -> None:
             db.close()
 
     async def _enrich():
+        run = job_state.get_run("enrich")
+        if run and run.status == "running":
+            logger.info("Skipping scheduled enrichment — already running")
+            return
         db = SessionLocal()
         try:
             await run_enrich_batch(db)

@@ -51,10 +51,16 @@ export const enrich = {
   run: () => api.post("/enrich/run").then(r => r.data),
   status: () => api.get("/enrich/status").then(r => r.data),
   pause: () => api.post("/enrich/pause").then(r => r.data),
+  stop: () => api.post("/enrich/stop").then(r => r.data),
   resume: () => api.post("/enrich/resume").then(r => r.data),
   prompt: () => api.get("/enrich/prompt").then(r => r.data),
   runSingle: (id) => api.post(`/enrich/articles/${id}`).then(r => r.data),
   patchEntity: (type, id, body) => api.patch(`/enrich/entities/${type}/${id}`, body).then(r => r.data),
+  retryErrors: () => api.post("/enrich/retry-errors").then(r => r.data),
+  dismissErrors: () => api.post("/enrich/dismiss-errors").then(r => r.data),
+  getWhitelist: () => api.get("/enrich/whitelist").then(r => r.data),
+  addToWhitelist: (value, ioc_type, note) => api.post("/enrich/whitelist", { value, ioc_type, note }).then(r => r.data),
+  removeFromWhitelist: (id) => api.delete(`/enrich/whitelist/${id}`).then(r => r.data),
 };
 
 export const articles = {
@@ -70,6 +76,7 @@ export const bulletin = {
   generateBrief: () => api.post("/bulletin/brief/generate").then(r => r.data),
   scoreBreakdown: (itemId) => api.get(`/bulletin/items/${itemId}/score-breakdown`).then(r => r.data),
   rebuildItemScore: (itemId) => api.post(`/bulletin/rebuild-item/${itemId}`).then(r => r.data),
+  rebuildScores: () => api.post("/bulletin/rebuild-scores").then(r => r.data),
 };
 
 export const feedback = {
@@ -86,6 +93,7 @@ export const search = {
   articles: (params) => api.get("/search", { params }).then(r => r.data),
   ioc: (q, ioc_type) => api.get("/search/ioc", { params: { q, ioc_type } }).then(r => r.data),
   actors: (q = "") => api.get("/search/actors", { params: { q } }).then(r => r.data),
+  cleanupActors: () => api.post("/search/actors/cleanup").then(r => r.data),
   actor: (id) => api.get(`/search/actors/${id}`).then(r => r.data),
   tags: () => api.get("/search/tags").then(r => r.data),
 };

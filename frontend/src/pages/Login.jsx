@@ -32,8 +32,25 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-navy-950 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen bg-navy-950 flex items-center justify-center px-4 relative overflow-hidden">
+      {/* Subtle background grid */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: `
+            linear-gradient(rgba(85,88,212,0.04) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(85,88,212,0.04) 1px, transparent 1px)
+          `,
+          backgroundSize: "40px 40px",
+        }}
+      />
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: "radial-gradient(ellipse 60% 50% at 50% 50%, rgba(85,88,212,0.06) 0%, transparent 70%)",
+        }}
+      />
+      <div className="w-full max-w-sm relative z-10">
         <div className="flex items-center gap-3 mb-8 justify-center">
           <div className="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center text-white shadow-glow">
             <ShieldIcon />

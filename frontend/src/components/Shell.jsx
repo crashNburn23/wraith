@@ -96,7 +96,7 @@ export default function Shell({ children }) {
                     </span>
                     {label}
                     {isActive && (
-                      <span className="ml-auto w-1.5 h-1.5 rounded-full bg-brand-400" />
+                      <span className="ml-auto w-1.5 h-1.5 rounded-full bg-brand-400" title="Current page" />
                     )}
                   </>
                 )}

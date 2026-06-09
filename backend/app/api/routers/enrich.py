@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Literal
 from pydantic import BaseModel
 from app.api.deps import get_db
-from app.models import Article, IOC, TTPTag, ArticleActor, CVEMention
+from app.models import Article, IOC, TTPTag, ArticleActor, CVEMention, IOCWhitelist
 from app.services import job_state
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
@@ -15,11 +15,20 @@ class EntityPatch(BaseModel):
     delete: bool = False
 
 
+class WhitelistAdd(BaseModel):
+    value: str
+    ioc_type: str
+    note: str | None = None
+
+
 @router.post("/run")
 async def run_enrichment(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     run = job_state.get_run("enrich")
     if run and run.status == "running":
-        raise HTTPException(409, "Enrichment already running. Pause or wait for it to finish.")
+        raise HTTPException(409, "Enrichment already running. Stop or wait for it to finish.")
+
+    job_state.set_stopped("enrich", False)
+    job_state.set_paused("enrich", False)
 
     from app.services.enrichment_runner import run_enrich_batch
 
@@ -38,6 +47,7 @@ def enrich_status(db: Session = Depends(get_db)):
     error_count = db.query(Article).filter(Article.enrichment_status == "error").count()
     return {
         "paused": job_state.is_paused("enrich"),
+        "stopped": job_state.is_stopped("enrich"),
         "pending_articles": pending_count,
         "enriched_articles": enriched_count,
         "error_articles": error_count,
@@ -52,6 +62,15 @@ def pause_enrichment():
         raise HTTPException(400, "No enrichment run is currently active.")
     job_state.set_paused("enrich", True)
     return {"status": "pause_requested", "message": "Will pause after the current article finishes."}
+
+
+@router.post("/stop")
+def stop_enrichment():
+    run = job_state.get_run("enrich")
+    if not run or run.status != "running":
+        raise HTTPException(400, "No enrichment run is currently active.")
+    job_state.set_stopped("enrich", True)
+    return {"status": "stop_requested", "message": "Will stop after the current article finishes."}
 
 
 @router.post("/resume")
@@ -84,6 +103,52 @@ async def enrich_single(article_id: str, db: Session = Depends(get_db)):
     from app.services.enrichment_runner import enrich_one
     ok = await enrich_one(db, article)
     return {"enriched": ok}
+
+
+@router.post("/retry-errors")
+def retry_errors(db: Session = Depends(get_db)):
+    count = db.query(Article).filter(Article.enrichment_status == "error").update({"enrichment_status": "pending"})
+    db.commit()
+    return {"reset": count}
+
+
+@router.post("/dismiss-errors")
+def dismiss_errors(db: Session = Depends(get_db)):
+    count = db.query(Article).filter(Article.enrichment_status == "error").update({"enrichment_status": "no_text"})
+    db.commit()
+    return {"dismissed": count}
+
+
+@router.get("/whitelist")
+def get_whitelist(db: Session = Depends(get_db)):
+    items = db.query(IOCWhitelist).order_by(IOCWhitelist.created_at.desc()).all()
+    return [
+        {"id": i.id, "value": i.value, "ioc_type": i.ioc_type, "note": i.note,
+         "created_at": i.created_at.isoformat()}
+        for i in items
+    ]
+
+
+@router.post("/whitelist")
+def add_to_whitelist(body: WhitelistAdd, db: Session = Depends(get_db)):
+    existing = db.query(IOCWhitelist).filter(IOCWhitelist.value == body.value).first()
+    if existing:
+        return {"id": existing.id, "already_existed": True}
+    entry = IOCWhitelist(value=body.value, ioc_type=body.ioc_type, note=body.note)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return {"id": entry.id, "already_existed": False}
+
+
+@router.delete("/whitelist/{item_id}")
+def remove_from_whitelist(item_id: str, db: Session = Depends(get_db)):
+    entry = db.query(IOCWhitelist).filter(IOCWhitelist.id == item_id).first()
+    if not entry:
+        raise HTTPException(404, "Whitelist entry not found")
+    db.delete(entry)
+    db.commit()
+    return {"deleted": True}
 
 
 @router.patch("/entities/{entity_type}/{entity_id}")

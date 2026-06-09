@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { sources as sourcesApi, ingest, enrich, bulletin as bulletinApi, settings as settingsApi, cve } from "../lib/api";
+import { sources as sourcesApi, ingest, enrich as enrichApi, bulletin as bulletinApi, settings as settingsApi, cve, feedback as feedbackApi } from "../lib/api";
 import { Button, Input, Card, Spinner, Divider } from "../components/ui";
 
-function TagInput({ tags, onChange, placeholder }) {
+function TagInput({ tags, onChange, placeholder, color = "bg-navy-800 border-navy-border text-slate-300" }) {
   const [input, setInput] = useState("");
 
   const add = () => {
@@ -16,9 +16,9 @@ function TagInput({ tags, onChange, placeholder }) {
     <div>
       <div className="flex flex-wrap gap-1.5 mb-2">
         {tags.map(t => (
-          <span key={t} className="flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-navy-800 border border-navy-border text-slate-300">
+          <span key={t} className={`flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md border ${color}`}>
             {t}
-            <button onClick={() => onChange(tags.filter(x => x !== t))} className="text-slate-600 hover:text-red-400 leading-none">×</button>
+            <button onClick={() => onChange(tags.filter(x => x !== t))} className="opacity-50 hover:opacity-100 hover:text-red-400 leading-none">×</button>
           </span>
         ))}
       </div>
@@ -76,6 +76,14 @@ function IngestTracker() {
     mutationFn: ingest.run,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ingest-status"] }),
   });
+  const retryMut = useMutation({
+    mutationFn: enrichApi.retryErrors,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ingest-status"] }); qc.invalidateQueries({ queryKey: ["enrich-status"] }); },
+  });
+  const dismissMut = useMutation({
+    mutationFn: enrichApi.dismissErrors,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ingest-status"] }); qc.invalidateQueries({ queryKey: ["enrich-status"] }); },
+  });
 
   const run = data?.current_run;
   const articles = data?.articles;
@@ -101,7 +109,27 @@ function IngestTracker() {
           <span className="text-yellow-400">Pending: <span className="font-mono">{articles.pending}</span></span>
           <span className="text-green-400">Enriched: <span className="font-mono">{articles.enriched}</span></span>
           <span className="text-slate-500">No text: <span className="font-mono">{articles.no_text}</span></span>
-          {articles.error > 0 && <span className="text-red-400">Errors: <span className="font-mono">{articles.error}</span></span>}
+          {articles.error > 0 && (
+            <span className="text-red-400 flex items-center gap-1.5">
+              Errors: <span className="font-mono">{articles.error}</span>
+              <button
+                onClick={() => retryMut.mutate()}
+                disabled={retryMut.isPending || dismissMut.isPending}
+                className="text-[10px] font-mono text-red-400/60 hover:text-red-300 border border-red-500/20 rounded px-1 py-0.5 transition-colors disabled:opacity-30"
+                title="Reset errored articles to pending — they'll retry on next enrich run"
+              >
+                {retryMut.isPending ? "…" : "retry"}
+              </button>
+              <button
+                onClick={() => dismissMut.mutate()}
+                disabled={retryMut.isPending || dismissMut.isPending}
+                className="text-[10px] font-mono text-slate-600 hover:text-slate-400 border border-slate-600/30 rounded px-1 py-0.5 transition-colors disabled:opacity-30"
+                title="Permanently dismiss these errors — they won't retry"
+              >
+                {dismissMut.isPending ? "…" : "remove"}
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -143,7 +171,7 @@ function EnrichTracker() {
 
   const { data } = useQuery({
     queryKey: ["enrich-status"],
-    queryFn: enrich.status,
+    queryFn: enrichApi.status,
     refetchInterval: (query) => {
       const run = query.state.data?.current_run;
       return run?.status === "running" ? 2000 : 10000;
@@ -151,22 +179,35 @@ function EnrichTracker() {
   });
 
   const runMut = useMutation({
-    mutationFn: enrich.run,
+    mutationFn: enrichApi.run,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["enrich-status"] }),
     onError: (e) => alert(e.response?.data?.detail || "Failed to start enrichment"),
   });
   const pauseMut = useMutation({
-    mutationFn: enrich.pause,
+    mutationFn: enrichApi.pause,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["enrich-status"] }),
+  });
+  const stopMut = useMutation({
+    mutationFn: enrichApi.stop,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["enrich-status"] }),
   });
   const resumeMut = useMutation({
-    mutationFn: enrich.resume,
+    mutationFn: enrichApi.resume,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["enrich-status"] }),
+  });
+  const retryMut = useMutation({
+    mutationFn: enrichApi.retryErrors,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["enrich-status"] }); qc.invalidateQueries({ queryKey: ["ingest-status"] }); },
+  });
+  const dismissMut = useMutation({
+    mutationFn: enrichApi.dismissErrors,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["enrich-status"] }); qc.invalidateQueries({ queryKey: ["ingest-status"] }); },
   });
 
   const run = data?.current_run;
   const isRunning = run?.status === "running";
   const isPaused = run?.status === "paused" || data?.paused;
+  const isStopped = run?.status === "stopped";
   const pct = run?.total > 0 ? Math.round((run.processed / run.total) * 100) : 0;
 
   return (
@@ -175,9 +216,14 @@ function EnrichTracker() {
         <h3 className="text-sm font-semibold text-slate-300">Enrich</h3>
         <div className="flex gap-1.5">
           {isRunning ? (
-            <Button size="sm" variant="danger" onClick={() => pauseMut.mutate()} disabled={pauseMut.isPending}>
-              Pause
-            </Button>
+            <>
+              <Button size="sm" variant="secondary" onClick={() => pauseMut.mutate()} disabled={pauseMut.isPending || stopMut.isPending}>
+                Pause
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => stopMut.mutate()} disabled={stopMut.isPending || pauseMut.isPending}>
+                Stop
+              </Button>
+            </>
           ) : isPaused ? (
             <Button size="sm" variant="success" onClick={() => resumeMut.mutate()} disabled={resumeMut.isPending}>
               Resume
@@ -195,7 +241,27 @@ function EnrichTracker() {
         <div className="flex gap-3 text-xs mb-3 flex-wrap">
           <span className="text-yellow-400">Pending: <span className="font-mono">{data.pending_articles}</span></span>
           <span className="text-green-400">Enriched: <span className="font-mono">{data.enriched_articles}</span></span>
-          {data.error_articles > 0 && <span className="text-red-400">Errors: <span className="font-mono">{data.error_articles}</span></span>}
+          {data.error_articles > 0 && (
+            <span className="text-red-400 flex items-center gap-1.5">
+              Errors: <span className="font-mono">{data.error_articles}</span>
+              <button
+                onClick={() => retryMut.mutate()}
+                disabled={retryMut.isPending || dismissMut.isPending}
+                className="text-[10px] font-mono text-red-400/60 hover:text-red-300 border border-red-500/20 rounded px-1 py-0.5 transition-colors disabled:opacity-30"
+                title="Reset errored articles to pending — they'll retry on next enrich run"
+              >
+                {retryMut.isPending ? "…" : "retry"}
+              </button>
+              <button
+                onClick={() => dismissMut.mutate()}
+                disabled={retryMut.isPending || dismissMut.isPending}
+                className="text-[10px] font-mono text-slate-600 hover:text-slate-400 border border-slate-600/30 rounded px-1 py-0.5 transition-colors disabled:opacity-30"
+                title="Permanently dismiss these errors — they won't retry"
+              >
+                {dismissMut.isPending ? "…" : "remove"}
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -213,7 +279,7 @@ function EnrichTracker() {
           {run.total > 0 && (
             <div className="bg-navy-700 rounded-full h-1.5 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all ${run.status === "completed" ? "bg-green-500" : run.status === "paused" ? "bg-yellow-500" : "bg-brand-500"}`}
+                className={`h-full rounded-full transition-all ${run.status === "completed" ? "bg-green-500" : run.status === "paused" ? "bg-yellow-500" : run.status === "stopped" ? "bg-orange-500" : "bg-brand-500"}`}
                 style={{ width: `${pct}%` }}
               />
             </div>
@@ -274,6 +340,7 @@ function RunStatusBadge({ status }) {
   const styles = {
     running:   "bg-blue-900/50 text-blue-300",
     paused:    "bg-yellow-900/50 text-yellow-300",
+    stopped:   "bg-orange-900/50 text-orange-300",
     completed: "bg-green-900/50 text-green-300",
     error:     "bg-red-900/50 text-red-300",
     idle:      "bg-navy-800 text-slate-400",
@@ -407,7 +474,7 @@ function ControlsSection() {
 function SystemPromptSection() {
   const { data, isLoading } = useQuery({
     queryKey: ["enrich-prompt"],
-    queryFn: enrich.prompt,
+    queryFn: enrichApi.prompt,
   });
   const [copied, setCopied] = useState(false);
 
@@ -469,24 +536,30 @@ function ProfileSection() {
   const update = (field, value) => { setProfile(p => ({ ...p, [field]: value })); setDirty(true); };
 
   const FIELDS = [
-    { key: "sectors",      label: "Sectors",         placeholder: "e.g. Finance", presets: PRESET_SECTORS,
-      hint: "Articles targeting these sectors score higher" },
+    { key: "sectors",      label: "Sectors",           placeholder: "e.g. Finance",   presets: PRESET_SECTORS,
+      hint: "Articles targeting these sectors score higher",
+      color: "bg-blue-900/30 text-blue-300 border-blue-500/20" },
     { key: "categories",   label: "Threat Categories", placeholder: "e.g. Ransomware", presets: PRESET_CATEGORIES,
-      hint: "Boost articles matching these threat types" },
-    { key: "threat_actors", label: "Threat Actors",   placeholder: "e.g. APT28",
-      hint: "Boost articles mentioning these actors" },
-    { key: "keywords",     label: "Keywords",         placeholder: "e.g. zero-day",
-      hint: "Matched against title and summary" },
-    { key: "geo_targets",  label: "Geo Targets",      placeholder: "e.g. US, EU",
-      hint: "Boost articles where your regions are targeted" },
-    { key: "geo_origins",  label: "Threat Origins",   placeholder: "e.g. China, Russia",
-      hint: "Boost articles originating from tracked adversary nations" },
+      hint: "Boost articles matching these threat types",
+      color: "bg-orange-900/30 text-orange-300 border-orange-500/20" },
+    { key: "threat_actors", label: "Threat Actors",    placeholder: "e.g. APT28",
+      hint: "Boost articles mentioning these actors",
+      color: "bg-violet-900/30 text-violet-300 border-violet-500/20" },
+    { key: "keywords",     label: "Keywords",           placeholder: "e.g. zero-day",
+      hint: "Matched against title and summary",
+      color: "bg-emerald-900/30 text-emerald-300 border-emerald-500/20" },
+    { key: "geo_targets",  label: "Geo Targets",        placeholder: "e.g. US, EU",
+      hint: "Boost articles where your regions are targeted",
+      color: "bg-cyan-900/30 text-cyan-300 border-cyan-500/20" },
+    { key: "geo_origins",  label: "Threat Origins",     placeholder: "e.g. China, Russia",
+      hint: "Boost articles originating from tracked adversary nations",
+      color: "bg-red-900/30 text-red-300 border-red-500/20" },
   ];
 
   return (
     <CollapsibleCard title="Interest Profile" subtitle="Shapes relevance scoring — what you care about surfaces higher in the bulletin">
       <div className="space-y-5">
-        {FIELDS.map(({ key, label, placeholder, presets, hint }) => (
+        {FIELDS.map(({ key, label, placeholder, presets, hint, color }) => (
           <div key={key}>
             <div className="flex items-baseline gap-2 mb-1.5">
               <span className="text-sm text-slate-300 font-medium">{label}</span>
@@ -512,6 +585,7 @@ function ProfileSection() {
               tags={profile[key] || []}
               onChange={v => update(key, v)}
               placeholder={placeholder}
+              color={color}
             />
           </div>
         ))}
@@ -524,6 +598,67 @@ function ProfileSection() {
         {dirty && <span className="text-xs text-yellow-400">Unsaved changes</span>}
         {saveMut.isSuccess && !dirty && <span className="text-xs text-green-400">Saved — rebuild bulletin to apply</span>}
       </div>
+    </CollapsibleCard>
+  );
+}
+
+// ─── Natural Language Feedback ────────────────────────────────────────────────
+
+const NL_PROFILE_LABELS = {
+  sectors:       { label: "Sectors",       color: "text-orange-300 bg-orange-900/30 border-orange-500/20" },
+  categories:    { label: "Categories",    color: "text-blue-300 bg-blue-900/30 border-blue-500/20"       },
+  keywords:      { label: "Keywords",      color: "text-emerald-300 bg-emerald-900/30 border-emerald-500/20" },
+  threat_actors: { label: "Threat Actors", color: "text-violet-300 bg-violet-900/30 border-violet-500/20" },
+};
+
+function NaturalLanguageFeedbackSection() {
+  const qc = useQueryClient();
+  const [text, setText] = useState("");
+  const mut = useMutation({
+    mutationFn: () => feedbackApi.applyNote(text),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profile"] }),
+  });
+  const anyAdded = mut.data && Object.values(mut.data.added).some(arr => arr.length > 0);
+
+  return (
+    <CollapsibleCard title="Natural Language Feedback" subtitle="Describe your interests in plain English — extracts and adds preferences to your profile">
+      <textarea
+        value={text}
+        onChange={e => { setText(e.target.value); mut.reset(); }}
+        placeholder="e.g. I'm most interested in ransomware targeting healthcare and critical infrastructure. I'd also like to see more on living-off-the-land techniques and APT28 activity…"
+        rows={3}
+        className="w-full bg-navy-800 border border-navy-border rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-brand-500/50 resize-none font-sans leading-relaxed mb-3"
+      />
+      <div className="flex items-center justify-between">
+        <div className="flex-1 min-w-0 mr-3">
+          {mut.isError && <p className="text-[11px] text-red-400 font-mono">{mut.error?.response?.data?.detail || "Something went wrong."}</p>}
+          {mut.isSuccess && !anyAdded && <p className="text-[11px] text-slate-500 font-mono">Nothing new — those preferences are already in your profile.</p>}
+        </div>
+        <Button size="sm" onClick={() => mut.mutate()} disabled={mut.isPending || !text.trim()}>
+          {mut.isPending ? <><Spinner size="sm" /> Applying…</> : "Apply to profile"}
+        </Button>
+      </div>
+      {mut.isSuccess && anyAdded && (
+        <div className="mt-3 pt-3 border-t border-navy-border">
+          <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest mb-2">Added to your profile</p>
+          <div className="space-y-1.5">
+            {Object.entries(NL_PROFILE_LABELS).map(([key, meta]) => {
+              const added = mut.data.added[key] || [];
+              if (!added.length) return null;
+              return (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-600 font-mono w-24 flex-shrink-0">{meta.label}</span>
+                  <div className="flex flex-wrap gap-1">
+                    {added.map(v => (
+                      <span key={v} className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${meta.color}`}>{v}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </CollapsibleCard>
   );
 }
@@ -645,14 +780,32 @@ function ScoringSection() {
       </details>
 
       {error && <div className="text-red-400 text-xs mb-3">{error}</div>}
-      <div className="flex gap-2 items-center">
+      <div className="flex gap-2 items-center flex-wrap">
         <Button onClick={() => { if (!sumOk) { setError(`Weights must sum to 100%`); return; } saveMut.mutate({ ...weights, ...advanced }); }} disabled={!dirty || !sumOk || saveMut.isPending}>
           {saveMut.isPending ? <><Spinner size="sm" /> Saving…</> : "Save Weights"}
         </Button>
+        <RebuildScoresButton />
         {dirty && <span className="text-xs text-yellow-400">Unsaved changes</span>}
-        {saveMut.isSuccess && !dirty && <span className="text-xs text-green-400">Saved — rebuild bulletin to apply</span>}
+        {saveMut.isSuccess && !dirty && <span className="text-xs text-green-400">Saved</span>}
       </div>
     </CollapsibleCard>
+  );
+}
+
+function RebuildScoresButton() {
+  const qc = useQueryClient();
+  const mut = useMutation({
+    mutationFn: bulletinApi.rebuildScores,
+    onSuccess: (data) => qc.invalidateQueries({ queryKey: ["bulletin-today"] }),
+  });
+  return (
+    <div className="flex items-center gap-2">
+      <Button variant="secondary" size="sm" onClick={() => mut.mutate()} disabled={mut.isPending}>
+        {mut.isPending ? <><Spinner size="sm" /> Rebuilding…</> : "Rebuild Today's Scores"}
+      </Button>
+      {mut.isSuccess && <span className="text-xs text-green-400">{mut.data?.recomputed} items rescored</span>}
+      {mut.isError && <span className="text-xs text-red-400">{mut.error?.response?.data?.detail || "No bulletin for today"}</span>}
+    </div>
   );
 }
 
@@ -807,6 +960,7 @@ export default function Settings() {
       <h1 className="text-xl font-bold text-white">Settings</h1>
       <ControlsSection />
       <ProfileSection />
+      <NaturalLanguageFeedbackSection />
       <ScoringSection />
       <SystemPromptSection />
       <SourcesSection />

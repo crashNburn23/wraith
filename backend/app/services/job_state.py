@@ -87,6 +87,7 @@ class JobRun:
 # Module-level state
 _runs: dict[str, Optional[JobRun]] = {"ingest": None, "enrich": None}
 _paused: dict[str, bool] = {"enrich": False}
+_stopped: dict[str, bool] = {"enrich": False}
 
 
 def start_run(job_type: str, total: int = 0) -> JobRun:
@@ -107,6 +108,15 @@ def is_paused(job_type: str = "enrich") -> bool:
 def set_paused(job_type: str, paused: bool) -> None:
     with _lock:
         _paused[job_type] = paused
+
+
+def is_stopped(job_type: str = "enrich") -> bool:
+    return _stopped.get(job_type, False)
+
+
+def set_stopped(job_type: str, stopped: bool) -> None:
+    with _lock:
+        _stopped[job_type] = stopped
 
 
 def finish_run(run: JobRun, status: str = "completed") -> None:

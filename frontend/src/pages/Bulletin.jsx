@@ -45,7 +45,7 @@ function CyberScoreBadge({ score, expanded, onToggle }) {
   return (
     <button
       onClick={onToggle}
-      title="Click to expand score breakdown"
+      title={`Ranking score: ${val}/100 (threat × relevance composite — click for breakdown)`}
       style={{
         position: "absolute", top: 8, right: 8,
         width: 36, height: 36, borderRadius: "50%",
@@ -91,7 +91,7 @@ function ReadStatusCycle({ articleId, initialStatus = "unread" }) {
 
 // ─── Bulletin card ────────────────────────────────────────────────────────────
 
-function BulletinCard({ item, onHide, dimmed = false }) {
+function BulletinCard({ item, onHide: onDismiss, dimmed = false, focused = false, onFocus }) {
   const { article, score, rank, user_rating, user_reason_tags, read_status } = item;
   const [expanded, setExpanded] = useState(false);
   const c = cyberColor(score.computed_score);
@@ -99,12 +99,13 @@ function BulletinCard({ item, onHide, dimmed = false }) {
   return (
     <div
       className="relative overflow-hidden rounded-xl group/card"
+      onClick={onFocus}
       style={{
         background: "#0D1628",
-        border: `1px solid ${c.border}`,
+        border: `1px solid ${focused ? "rgba(85,88,212,0.6)" : c.border}`,
         borderLeft: `2px solid ${c.hex}`,
-        boxShadow: `inset 2px 0 8px ${c.dim}`,
-        transition: "box-shadow 0.2s ease, opacity 0.15s ease",
+        boxShadow: focused ? `inset 2px 0 8px ${c.dim}, 0 0 0 1px rgba(85,88,212,0.25)` : `inset 2px 0 8px ${c.dim}`,
+        transition: "box-shadow 0.2s ease, opacity 0.15s ease, border-color 0.15s ease",
         opacity: dimmed ? 0.35 : 1,
       }}
     >
@@ -132,7 +133,10 @@ function BulletinCard({ item, onHide, dimmed = false }) {
                     </span>
                   )}
                   {article.ai_severity_score != null && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${severityBg(article.ai_severity_score)}`}>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${severityBg(article.ai_severity_score)}`}
+                      title="AI-assigned severity score (0–100)"
+                    >
                       sev {article.ai_severity_score.toFixed(0)}
                     </span>
                   )}
@@ -170,17 +174,17 @@ function BulletinCard({ item, onHide, dimmed = false }) {
               <a href={article.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-600 hover:text-brand-400">
                 source ↗
               </a>
-              {/* Hide/unhide button */}
+              {/* Dismiss/undismiss button */}
               <button
-                onClick={() => onHide(article.id)}
+                onClick={() => onDismiss(article.id)}
                 className={`ml-auto text-[10px] font-mono transition-opacity ${
                   dimmed
                     ? "text-brand-500 opacity-100 hover:text-brand-300"
                     : "text-slate-700 opacity-0 group-hover/card:opacity-100 hover:text-slate-400"
                 }`}
-                title={dimmed ? "Unhide" : "Hide from bulletin"}
+                title={dimmed ? "Undismiss" : "Dismiss from bulletin"}
               >
-                {dimmed ? "[UNHIDE]" : "[HIDE]"}
+                {dimmed ? "[UNDISMISS]" : "[DISMISS]"}
               </button>
             </div>
           </div>
@@ -200,26 +204,48 @@ function BulletinCard({ item, onHide, dimmed = false }) {
 // ─── Daily Brief Card ─────────────────────────────────────────────────────────
 
 function DailyBriefCard({ brief, briefGeneratedAt, bulletinDate, onRegenerate, isRegenerating }) {
-  const [expanded, setExpanded] = useState(true);
+  const storageKey = `brief-seen-${bulletinDate}`;
+  const alreadySeen = typeof window !== "undefined" && !!localStorage.getItem(storageKey);
+  const [expanded, setExpanded] = useState(!alreadySeen);
 
-  const paragraphs = brief
-    ? brief.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
+  const toggle = () => {
+    setExpanded(v => {
+      const next = !v;
+      if (!next) localStorage.setItem(storageKey, "1");
+      return next;
+    });
+  };
+
+  // Split off SOURCES: line if present
+  let sources = [];
+  let briefText = brief || "";
+  const sourcesMatch = briefText.match(/\n\nSOURCES:(.+)$/s);
+  if (sourcesMatch) {
+    briefText = briefText.slice(0, sourcesMatch.index);
+    sources = sourcesMatch[1].split("||").map(s => {
+      const [id, ...titleParts] = s.split("::");
+      return { id: id.trim(), title: titleParts.join("::").trim() };
+    }).filter(s => s.id && s.title);
+  }
+
+  const paragraphs = briefText
+    ? briefText.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
     : [];
 
   return (
     <div
       className="mb-6 rounded-xl overflow-hidden"
       style={{
-        background: "linear-gradient(135deg, #090f1d 0%, #0b1120 100%)",
-        border: "1px solid rgba(85,88,212,0.28)",
-        borderLeft: "2px solid rgba(85,88,212,0.7)",
-        boxShadow: "inset 2px 0 12px rgba(85,88,212,0.06), 0 1px 3px rgba(0,0,0,0.4)",
+        background: "linear-gradient(135deg, #0d1430 0%, #0e1535 100%)",
+        border: "1px solid rgba(85,88,212,0.45)",
+        borderLeft: "3px solid rgba(85,88,212,0.85)",
+        boxShadow: "inset 2px 0 16px rgba(85,88,212,0.10), 0 2px 8px rgba(0,0,0,0.5)",
       }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "1px solid rgba(85,88,212,0.15)" }}>
         <button
-          onClick={() => setExpanded(v => !v)}
+          onClick={toggle}
           className="flex items-center gap-2.5 group"
         >
           <span
@@ -270,6 +296,16 @@ function DailyBriefCard({ brief, briefGeneratedAt, bulletinDate, onRegenerate, i
                   {p}
                 </p>
               ))}
+              {sources.length > 0 && (
+                <div className="pt-3 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1" style={{ borderTop: "1px solid rgba(85,88,212,0.15)" }}>
+                  <span className="text-[10px] font-mono font-semibold uppercase tracking-widest text-slate-600">Sources</span>
+                  {sources.map((s, i) => (
+                    <Link key={s.id} to={`/articles/${s.id}`} className="text-[11px] font-mono text-brand-400/70 hover:text-brand-300 hover:underline underline-offset-2 transition-colors">
+                      [{i + 1}] {s.title}
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-slate-600 text-sm font-mono">No brief yet — build the bulletin to generate one.</p>
@@ -287,6 +323,7 @@ export default function Bulletin() {
   const [hidden, setHidden] = useState(loadHidden);
   const [showHidden, setShowHidden] = useState(false);
   const [page, setPage] = useState(0);
+  const [focusedIdx, setFocusedIdx] = useState(0);
   const autoBuilt = useRef(false);
   const [waitingForBrief, setWaitingForBrief] = useState(false);
   const prevBriefGenAt = useRef(null);
@@ -331,27 +368,55 @@ export default function Bulletin() {
     }
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hideArticle = useCallback((articleId) => {
+  const dismissArticle = useCallback((articleId) => {
     setHidden(prev => {
       const next = new Set(prev);
       if (next.has(articleId)) {
-        next.delete(articleId);   // toggle: clicking [UNHIDE] removes it
+        next.delete(articleId);
       } else {
         next.add(articleId);
+        feedbackApi.setReadStatus(articleId, "dismissed");
       }
       saveHidden(next);
       return next;
     });
   }, []);
 
-  const unhideAll = useCallback(() => {
+  const undismissAll = useCallback(() => {
     setHidden(new Set());
     saveHidden(new Set());
     setShowHidden(false);
     setPage(0);
   }, []);
 
-  useEffect(() => { setPage(0); }, [showHidden]);
+  useEffect(() => { setPage(0); setFocusedIdx(0); }, [showHidden]);
+
+  // Store nav context for article-page hotkeys (all bulletin article IDs in order)
+  useEffect(() => {
+    const items = data?.items;
+    if (items?.length > 0) {
+      sessionStorage.setItem("bulletin-nav", JSON.stringify(items.map(i => i.article.id)));
+    }
+  }, [data]);
+
+  // Keyboard shortcuts: j/k navigate, o open article, h dismiss, u/d rate
+  useEffect(() => {
+    const allData = data?.items || [];
+    const handler = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      const items = (showHidden ? allData : allData.filter(i => !hidden.has(i.article.id)))
+        .slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+      if (!items.length) return;
+      if (e.key === "j") { e.preventDefault(); setFocusedIdx(i => Math.min(i + 1, items.length - 1)); }
+      if (e.key === "k") { e.preventDefault(); setFocusedIdx(i => Math.max(i - 1, 0)); }
+      if (e.key === "o") { const item = items[focusedIdx]; if (item) window.location.href = `/articles/${item.article.id}`; }
+      if (e.key === "h") { const item = items[focusedIdx]; if (item) dismissArticle(item.article.id); }
+      if (e.key === "u") { const item = items[focusedIdx]; if (item) { feedbackApi.rate(item.article.id, 1).then(() => qc.invalidateQueries({ queryKey: ["bulletin-today"] })); } }
+      if (e.key === "d") { const item = items[focusedIdx]; if (item) { feedbackApi.rate(item.article.id, -1).then(() => qc.invalidateQueries({ queryKey: ["bulletin-today"] })); } }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [data, hidden, showHidden, page, focusedIdx, dismissArticle, qc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) return <div className="flex justify-center mt-20"><Spinner size="lg" /></div>;
   if (error)     return <div className="p-8 text-red-400">Error loading bulletin.</div>;
@@ -374,8 +439,16 @@ export default function Bulletin() {
             <p className="text-xs text-slate-500 font-mono mt-0.5">{data.bulletin_date}</p>
           )}
         </div>
-        <Button onClick={() => buildMut.mutate()} disabled={buildMut.isPending} size="sm">
-          {buildMut.isPending ? <><Spinner size="sm" /> Building…</> : "Build Bulletin"}
+        <Button
+          onClick={() => {
+            if (allItems.length > 0 && !window.confirm("Rebuild today's bulletin? This will rescore and re-rank all articles.")) return;
+            buildMut.mutate();
+          }}
+          disabled={buildMut.isPending}
+          size="sm"
+          variant={allItems.length === 0 ? "primary" : "secondary"}
+        >
+          {buildMut.isPending ? <><Spinner size="sm" /> Building…</> : allItems.length > 0 ? "Rebuild Bulletin" : "Build Bulletin"}
         </Button>
       </div>
 
@@ -410,13 +483,13 @@ export default function Bulletin() {
                 onClick={() => setShowHidden(v => !v)}
                 className="text-slate-500 hover:text-slate-300 transition-colors"
               >
-                {showHidden ? `[HIDE FILTERED]` : `[SHOW ${hiddenCount} HIDDEN]`}
+                {showHidden ? `[HIDE DISMISSED]` : `[SHOW ${hiddenCount} DISMISSED]`}
               </button>
               <button
-                onClick={unhideAll}
+                onClick={undismissAll}
                 className="text-slate-600 hover:text-slate-400 transition-colors"
               >
-                [UNHIDE ALL]
+                [UNDISMISS ALL]
               </button>
             </>
           )}
@@ -433,19 +506,21 @@ export default function Bulletin() {
       ) : visibleItems.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-slate-500 font-mono text-sm mb-3">All articles hidden.</p>
-          <button onClick={unhideAll} className="text-brand-400 hover:text-brand-300 font-mono text-xs">
-            [UNHIDE ALL]
+          <button onClick={undismissAll} className="text-brand-400 hover:text-brand-300 font-mono text-xs">
+            [UNDISMISS ALL]
           </button>
         </div>
       ) : (
         <>
           <div className="space-y-3">
-            {pagedItems.map(item => (
+            {pagedItems.map((item, idx) => (
               <BulletinCard
                 key={item.id}
                 item={item}
-                onHide={hideArticle}
+                onHide={dismissArticle}
                 dimmed={showHidden && hidden.has(item.article.id)}
+                focused={idx === focusedIdx}
+                onFocus={() => setFocusedIdx(idx)}
               />
             ))}
           </div>
@@ -472,6 +547,12 @@ export default function Bulletin() {
             </div>
           )}
         </>
+      )}
+
+      {allItems.length > 0 && (
+        <p className="mt-5 text-center text-[10px] font-mono text-slate-700">
+          j/k navigate · o open · h dismiss · u/d rate
+        </p>
       )}
     </div>
   );

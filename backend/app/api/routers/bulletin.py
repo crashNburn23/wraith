@@ -119,6 +119,31 @@ def get_bulletin(bulletin_date: str, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/rebuild-scores")
+def rebuild_all_scores(db: Session = Depends(get_db)):
+    """Recompute scores for every item in today's bulletin and re-rank."""
+    from app.services.scoring import compute_score, _get_config, _get_profile
+    today = date.today().isoformat()
+    bulletin = db.query(Bulletin).filter(Bulletin.bulletin_date == today).first()
+    if not bulletin:
+        raise HTTPException(404, "No bulletin found for today")
+
+    config = _get_config(db)
+    profile = _get_profile(db)
+
+    for item in bulletin.items:
+        breakdown = compute_score(db, item.article, config, profile)
+        for k, v in breakdown.items():
+            setattr(item, k, v)
+
+    # Re-rank by updated scores
+    for rank, item in enumerate(sorted(bulletin.items, key=lambda i: i.computed_score, reverse=True), start=1):
+        item.rank = rank
+
+    db.commit()
+    return {"recomputed": len(bulletin.items)}
+
+
 @router.post("/build")
 async def build_bulletin(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     from app.services.bulletin import build_bulletin as _build

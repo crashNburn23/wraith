@@ -126,11 +126,15 @@ async def generate_brief(db: Session, for_date: date | None = None) -> str | Non
             )
             brief_text = response.choices[0].message.content.strip()
 
-        bulletin.brief = brief_text
+        # Append source citations in a parseable format
+        sources = "||".join(f"{a.id}::{a.title}" for a in articles)
+        brief_with_sources = brief_text + f"\n\nSOURCES:{sources}"
+
+        bulletin.brief = brief_with_sources
         bulletin.brief_generated_at = datetime.now(timezone.utc)
         db.commit()
         logger.info("Daily brief generated for %s (%d words)", date_str, len(brief_text.split()))
-        return brief_text
+        return brief_with_sources
 
     except Exception as e:
         logger.error("Brief generation failed for %s: %s", date_str, e)

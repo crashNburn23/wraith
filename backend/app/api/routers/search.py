@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app.api.deps import get_db
 from app.models import Article, IOC, ThreatActor, ArticleActor, TTPTag
+from sqlalchemy import func
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -69,9 +70,15 @@ def search_ioc(db: Session = Depends(get_db), q: str = Query(default=""), ioc_ty
         query = query.filter(IOC.value.ilike(f"%{q}%"))
     if ioc_type:
         query = query.filter(IOC.ioc_type == ioc_type)
-    iocs = query.order_by(IOC.id.desc()).limit(200).all()
+    iocs = query.order_by(IOC.created_at.desc()).limit(200).all()
     return [
-        {"id": i.id, "ioc_type": i.ioc_type, "value": i.value, "article_id": i.article_id}
+        {
+            "id": i.id,
+            "ioc_type": i.ioc_type,
+            "value": i.value,
+            "article_id": i.article_id,
+            "created_at": i.created_at.isoformat() if i.created_at else None,
+        }
         for i in iocs
     ]
 
@@ -82,7 +89,33 @@ def search_actors(db: Session = Depends(get_db), q: str = Query("")):
     if q:
         query = query.filter(ThreatActor.name.ilike(f"%{q}%"))
     actors = query.order_by(ThreatActor.name).limit(50).all()
-    return [{"id": a.id, "name": a.name, "aliases": a.aliases} for a in actors]
+    if not actors:
+        return []
+
+    actor_ids = [a.id for a in actors]
+    stats_rows = (
+        db.query(
+            ArticleActor.actor_id,
+            func.count(ArticleActor.id).label("cnt"),
+            func.max(Article.published_at).label("last_seen"),
+        )
+        .join(Article, Article.id == ArticleActor.article_id)
+        .filter(ArticleActor.actor_id.in_(actor_ids))
+        .group_by(ArticleActor.actor_id)
+        .all()
+    )
+    stats = {row.actor_id: (row.cnt, row.last_seen) for row in stats_rows}
+
+    return [
+        {
+            "id": a.id,
+            "name": a.name,
+            "aliases": a.aliases,
+            "article_count": stats.get(a.id, (0, None))[0],
+            "last_seen": stats.get(a.id, (0, None))[1].isoformat() if stats.get(a.id, (0, None))[1] else None,
+        }
+        for a in actors
+    ]
 
 
 @router.get("/actors/{actor_id}")
@@ -99,6 +132,16 @@ def get_actor(actor_id: str, db: Session = Depends(get_db)):
         "article_count": len(article_ids),
         "article_ids": article_ids,
     }
+
+
+@router.post("/actors/cleanup")
+def cleanup_actors(db: Session = Depends(get_db)):
+    actors = db.query(ThreatActor).all()
+    orphaned = [a for a in actors if db.query(ArticleActor).filter(ArticleActor.actor_id == a.id).count() == 0]
+    for actor in orphaned:
+        db.delete(actor)
+    db.commit()
+    return {"removed": len(orphaned)}
 
 
 @router.get("/tags")

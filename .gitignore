@@ -29,3 +29,6 @@ backend/cti_platform.egg-info/
 .DS_Store
 .idea/
 *.swp
+
+# Local notes
+TODO.md
