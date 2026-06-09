@@ -83,7 +83,7 @@ export const feedback = {
 
 export const search = {
   articles: (params) => api.get("/search", { params }).then(r => r.data),
-  ioc: (q) => api.get("/search/ioc", { params: { q } }).then(r => r.data),
+  ioc: (q, ioc_type) => api.get("/search/ioc", { params: { q, ioc_type } }).then(r => r.data),
   actors: (q = "") => api.get("/search/actors", { params: { q } }).then(r => r.data),
   actor: (id) => api.get(`/search/actors/${id}`).then(r => r.data),
   tags: () => api.get("/search/tags").then(r => r.data),

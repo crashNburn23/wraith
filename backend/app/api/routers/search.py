@@ -63,8 +63,13 @@ def search(
 
 
 @router.get("/ioc")
-def search_ioc(db: Session = Depends(get_db), q: str = Query(...)):
-    iocs = db.query(IOC).filter(IOC.value.ilike(f"%{q}%")).limit(50).all()
+def search_ioc(db: Session = Depends(get_db), q: str = Query(default=""), ioc_type: str = Query(default="")):
+    query = db.query(IOC)
+    if q:
+        query = query.filter(IOC.value.ilike(f"%{q}%"))
+    if ioc_type:
+        query = query.filter(IOC.ioc_type == ioc_type)
+    iocs = query.order_by(IOC.id.desc()).limit(200).all()
     return [
         {"id": i.id, "ioc_type": i.ioc_type, "value": i.value, "article_id": i.article_id}
         for i in iocs

@@ -96,22 +96,41 @@ function ArticlesTab() {
 
 // ─── IOCs tab ─────────────────────────────────────────────────────────────────
 
+const IOC_TYPES = ["ip", "domain", "hash", "url", "email"];
+const IOC_TYPE_COLOR = { ip: "blue", domain: "purple", hash: "orange", url: "gray", email: "yellow" };
+
 function IOCsTab() {
   const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const { open } = useEntityModal();
   const { data, isLoading } = useQuery({
-    queryKey: ["search-ioc", q],
-    queryFn: () => search.ioc(q),
-    enabled: q.length > 1,
+    queryKey: ["search-ioc", q, typeFilter],
+    queryFn: () => search.ioc(q, typeFilter),
+    placeholderData: (prev) => prev,
   });
-
-  const IOC_TYPE_COLOR = { ip: "blue", domain: "purple", hash: "orange", url: "gray", email: "yellow" };
 
   return (
     <div className="p-5">
-      <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search IP, domain, hash, URL…" className="w-full mb-4" />
-      {q.length <= 1 && <p className="text-xs text-slate-600 font-mono">type 2+ characters to search</p>}
+      <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search IP, domain, hash, URL…" className="w-full mb-3" />
+      <div className="flex gap-1.5 mb-4 flex-wrap">
+        <button
+          onClick={() => setTypeFilter("")}
+          className={`text-[11px] px-2.5 py-1 rounded-md font-mono border transition-colors ${typeFilter === "" ? "bg-brand-500/20 border-brand-500/50 text-brand-300" : "border-navy-border text-slate-500 hover:border-slate-500 hover:text-slate-300"}`}
+        >
+          all
+        </button>
+        {IOC_TYPES.map(t => (
+          <button
+            key={t}
+            onClick={() => setTypeFilter(f => f === t ? "" : t)}
+            className={`text-[11px] px-2.5 py-1 rounded-md font-mono border transition-colors ${typeFilter === t ? "bg-brand-500/20 border-brand-500/50 text-brand-300" : "border-navy-border text-slate-500 hover:border-slate-500 hover:text-slate-300"}`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
       {isLoading && <Spinner />}
+      <div className="text-[11px] text-slate-600 font-mono mb-3">{(data || []).length} results</div>
       <div>
         {(data || []).map(ioc => (
           <div
@@ -210,7 +229,6 @@ function CVEsTab() {
 
 function ActorsTab() {
   const [q, setQ] = useState("");
-  const [selected, setSelected] = useState(null);
   const { open } = useEntityModal();
 
   const { data: actors, isLoading } = useQuery({
@@ -218,69 +236,26 @@ function ActorsTab() {
     queryFn: () => search.actors(q),
   });
 
-  const { data: actorDetail } = useQuery({
-    queryKey: ["actor", selected],
-    queryFn: () => search.actor(selected),
-    enabled: !!selected,
-  });
-
   return (
-    <div className="p-5 flex gap-4">
-      <div className="flex-1">
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search actors…" className="w-full mb-3" />
-        {isLoading ? <Spinner /> : (
-          <div className="space-y-0.5">
-            {(actors || []).map(a => (
-              <div key={a.id} className="flex items-center gap-1">
-                <button
-                  onClick={() => setSelected(a.id)}
-                  className={`flex-1 text-left px-3 py-2 rounded-lg text-sm transition-all ${
-                    selected === a.id
-                      ? "text-white border"
-                      : "hover:bg-navy-800 text-slate-300 border border-transparent"
-                  }`}
-                  style={selected === a.id ? {
-                    background: "rgba(119,34,170,0.08)",
-                    border: "1px solid rgba(119,34,170,0.32)",
-                    color: "#7722AA",
-                  } : {}}
-                >
-                  {a.name}
-                  {a.aliases?.length > 0 && (
-                    <span className="text-[11px] text-slate-500 ml-1.5 font-mono">{a.aliases.slice(0, 2).join(", ")}</span>
-                  )}
-                </button>
-                <button
-                  onClick={() => open("actor", a.id, a.name)}
-                  className="text-slate-600 hover:text-slate-300 text-xs px-2 py-1 rounded font-mono transition-colors"
-                  title="View details"
-                  style={{ color: "rgba(119,34,170,0.55)" }}
-                  onMouseEnter={e => e.currentTarget.style.color = "#7722AA"}
-                  onMouseLeave={e => e.currentTarget.style.color = "rgba(119,34,170,0.55)"}
-                >
-                  ↗
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {actorDetail && (
-        <div
-          className="w-64 flex-shrink-0 rounded-xl p-4"
-          style={{
-            background: "#0D1628",
-            border: "1px solid rgba(119,34,170,0.26)",
-            borderLeft: "2px solid #7722AA",
-            boxShadow: "inset 2px 0 6px rgba(119,34,170,0.05)",
-          }}
-        >
-          <div className="font-semibold font-mono mb-1" style={{ color: "#7722AA" }}>{actorDetail.name}</div>
-          {actorDetail.aliases?.length > 0 && (
-            <div className="text-[11px] text-slate-400 mb-3 font-mono">aka: {actorDetail.aliases.join(", ")}</div>
-          )}
-          <div className="text-[11px] text-slate-500 font-mono">{actorDetail.article_count} articles</div>
+    <div className="p-5">
+      <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search actors…" className="w-full mb-3" />
+      {isLoading ? <Spinner /> : (
+        <div className="space-y-0.5">
+          {(actors || []).map(a => (
+            <button
+              key={a.id}
+              onClick={() => open("actor", a.id, a.name)}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm transition-all hover:bg-navy-800 text-slate-300 border border-transparent"
+              style={{ borderLeft: "2px solid rgba(119,34,170,0.18)" }}
+              onMouseEnter={e => e.currentTarget.style.borderLeftColor = "rgba(119,34,170,0.55)"}
+              onMouseLeave={e => e.currentTarget.style.borderLeftColor = "rgba(119,34,170,0.18)"}
+            >
+              {a.name}
+              {a.aliases?.length > 0 && (
+                <span className="text-[11px] text-slate-500 ml-1.5 font-mono">{a.aliases.slice(0, 2).join(", ")}</span>
+              )}
+            </button>
+          ))}
         </div>
       )}
     </div>
