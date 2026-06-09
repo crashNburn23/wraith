@@ -9,6 +9,8 @@ class Bulletin(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     bulletin_date: Mapped[str] = mapped_column(String(10), unique=True, nullable=False)  # YYYY-MM-DD
     generated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    brief: Mapped[str | None] = mapped_column(String, nullable=True)
+    brief_generated_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     items = relationship("BulletinItem", back_populates="bulletin", order_by="BulletinItem.rank")
 

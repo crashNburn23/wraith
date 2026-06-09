@@ -67,6 +67,7 @@ export const bulletin = {
   history: () => api.get("/bulletin/history").then(r => r.data),
   get: (date) => api.get(`/bulletin/${date}`).then(r => r.data),
   build: () => api.post("/bulletin/build").then(r => r.data),
+  generateBrief: () => api.post("/bulletin/brief/generate").then(r => r.data),
   scoreBreakdown: (itemId) => api.get(`/bulletin/items/${itemId}/score-breakdown`).then(r => r.data),
   rebuildItemScore: (itemId) => api.post(`/bulletin/rebuild-item/${itemId}`).then(r => r.data),
 };

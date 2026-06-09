@@ -197,6 +197,89 @@ function BulletinCard({ item, onHide, dimmed = false }) {
   );
 }
 
+// ─── Daily Brief Card ─────────────────────────────────────────────────────────
+
+function DailyBriefCard({ brief, briefGeneratedAt, bulletinDate, onRegenerate, isRegenerating }) {
+  const [expanded, setExpanded] = useState(true);
+
+  const paragraphs = brief
+    ? brief.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
+    : [];
+
+  return (
+    <div
+      className="mb-6 rounded-xl overflow-hidden"
+      style={{
+        background: "linear-gradient(135deg, #090f1d 0%, #0b1120 100%)",
+        border: "1px solid rgba(85,88,212,0.28)",
+        borderLeft: "2px solid rgba(85,88,212,0.7)",
+        boxShadow: "inset 2px 0 12px rgba(85,88,212,0.06), 0 1px 3px rgba(0,0,0,0.4)",
+      }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "1px solid rgba(85,88,212,0.15)" }}>
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="flex items-center gap-2.5 group"
+        >
+          <span
+            className="text-[10px] font-mono font-bold uppercase tracking-widest px-1.5 py-0.5 rounded"
+            style={{ background: "rgba(85,88,212,0.15)", color: "rgba(85,88,212,0.9)", border: "1px solid rgba(85,88,212,0.3)" }}
+          >
+            DAILY BRIEF
+          </span>
+          <span className="text-xs text-slate-400 font-mono group-hover:text-slate-200 transition-colors">
+            {bulletinDate}
+          </span>
+          <span className="text-slate-700 text-[10px] transition-transform" style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}>▶</span>
+        </button>
+        <div className="flex items-center gap-3">
+          {briefGeneratedAt && (
+            <span className="text-[10px] text-slate-700 font-mono hidden sm:block">
+              {new Date(briefGeneratedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+          <button
+            onClick={onRegenerate}
+            disabled={isRegenerating}
+            className="flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded border transition-colors disabled:opacity-40"
+            style={{ borderColor: "rgba(85,88,212,0.3)", color: "rgba(85,88,212,0.7)" }}
+            onMouseEnter={e => { if (!isRegenerating) { e.currentTarget.style.borderColor = "rgba(85,88,212,0.6)"; e.currentTarget.style.color = "rgba(85,88,212,1)"; }}}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(85,88,212,0.3)"; e.currentTarget.style.color = "rgba(85,88,212,0.7)"; }}
+          >
+            {isRegenerating ? <><Spinner size="sm" /> regenerating…</> : "↺ regenerate"}
+          </button>
+        </div>
+      </div>
+
+      {/* Body */}
+      {expanded && (
+        <div className="px-5 py-4">
+          {isRegenerating && paragraphs.length === 0 ? (
+            <div className="flex items-center gap-2 text-slate-500 text-sm font-mono py-4">
+              <Spinner size="sm" /> Generating brief…
+            </div>
+          ) : paragraphs.length > 0 ? (
+            <div className="space-y-3">
+              {paragraphs.map((p, i) => (
+                <p
+                  key={i}
+                  className="text-sm leading-relaxed"
+                  style={{ color: i === 0 ? "#c8d0e0" : "#8a95a8" }}
+                >
+                  {p}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className="text-slate-600 text-sm font-mono">No brief yet — build the bulletin to generate one.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Bulletin() {
@@ -222,6 +305,13 @@ export default function Bulletin() {
     mutationFn: bulletinApi.build,
     onSuccess: () => {
       setTimeout(() => qc.invalidateQueries({ queryKey: ["bulletin-today"] }), 2000);
+    },
+  });
+
+  const briefMut = useMutation({
+    mutationFn: bulletinApi.generateBrief,
+    onSuccess: () => {
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["bulletin-today"] }), 4000);
     },
   });
 
@@ -286,6 +376,17 @@ export default function Bulletin() {
           <span className="text-amber-400/70 text-[10px] font-mono font-semibold uppercase tracking-widest flex-shrink-0">FEEDBACK LOOP</span>
           <span className="text-amber-300/60 text-[11px] font-mono">{fbSignal.active_reason}</span>
         </div>
+      )}
+
+      {/* Daily Brief */}
+      {(data?.brief || allItems.length > 0) && (
+        <DailyBriefCard
+          brief={data?.brief}
+          briefGeneratedAt={data?.brief_generated_at}
+          bulletinDate={data?.bulletin_date}
+          onRegenerate={() => briefMut.mutate()}
+          isRegenerating={briefMut.isPending}
+        />
       )}
 
       {/* Filter bar — only when there are hidden items or many items */}

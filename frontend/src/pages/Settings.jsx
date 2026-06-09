@@ -408,7 +408,6 @@ function SystemPromptSection() {
   const { data, isLoading } = useQuery({
     queryKey: ["enrich-prompt"],
     queryFn: enrich.prompt,
-    staleTime: Infinity,   // prompt doesn't change at runtime
   });
   const [copied, setCopied] = useState(false);
 

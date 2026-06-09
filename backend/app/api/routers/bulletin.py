@@ -68,6 +68,8 @@ def today_bulletin(db: Session = Depends(get_db)):
         "id": bulletin.id,
         "bulletin_date": bulletin.bulletin_date,
         "generated_at": bulletin.generated_at,
+        "brief": bulletin.brief,
+        "brief_generated_at": bulletin.brief_generated_at,
         "items": [
             _serialize_item(
                 i,
@@ -118,11 +120,22 @@ def get_bulletin(bulletin_date: str, db: Session = Depends(get_db)):
 
 
 @router.post("/build")
-def build_bulletin(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def build_bulletin(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     from app.services.bulletin import build_bulletin as _build
 
-    def _run():
+    async def _run():
         _build(db)
+
+    background_tasks.add_task(_run)
+    return {"status": "started"}
+
+
+@router.post("/brief/generate")
+async def generate_brief(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    from app.services.brief import generate_brief as _gen
+
+    async def _run():
+        await _gen(db)
 
     background_tasks.add_task(_run)
     return {"status": "started"}
