@@ -17,7 +17,7 @@ function iocStyle(iocType) {
   return TYPE_STYLE[`ioc_${iocType}`] || TYPE_STYLE.ioc_ip;
 }
 
-function buildRanges(text, highlights) {
+export function buildRanges(text, highlights) {
   const lower = text.toLowerCase();
   const ranges = [];
 
@@ -48,7 +48,7 @@ function buildRanges(text, highlights) {
   return merged;
 }
 
-function renderWithRanges(text, ranges) {
+export function renderWithRanges(text, ranges) {
   const parts = [];
   let cursor = 0;
   for (const r of ranges) {

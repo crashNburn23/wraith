@@ -56,6 +56,8 @@ class JobRun:
         started = self.started_at
         if started.tzinfo is None:
             started = started.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
         return round((end - started).total_seconds(), 1)
 
     def to_dict(self) -> dict:

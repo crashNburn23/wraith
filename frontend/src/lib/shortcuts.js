@@ -39,7 +39,7 @@ export const SHORTCUT_GROUPS = [
       ["j / k", "next / previous article"],
       ["u / n", "thumbs up / down"],
       ["m", "dismiss + back"],
-      ["e", "expand full article text"],
+      ["e", "raw text popout (highlighted enrichments)"],
       ["y", "copy source URL"],
       ["c or Esc", "back to bulletin"],
     ],

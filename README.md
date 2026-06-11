@@ -8,11 +8,7 @@ No cloud required. Runs entirely on localhost against a local Ollama model.
 
 ---
 
-![Daily Bulletin](docs/screenshots/bulletin.png)
-
-![Article Detail](docs/screenshots/article_detail.png)
-
-![Intel Hub](docs/screenshots/intel_hub.png)
+<video src="docs/screenshots/overview.webm" autoplay loop muted playsinline width="100%"></video>
 
 ---
 
@@ -140,8 +136,11 @@ Press `?` anywhere for the full cheat sheet. The bulletin is designed for **one-
 | `1`–`9` | jump to rank N |
 | `y` | copy source URL |
 | `t` | triage mode |
+| `e` | raw text popout with highlighted enrichments (article page) |
 | `g` then `b`/`i`/`c`/`f`/`s` | go to Bulletin / Intel / Chat / Feedback / Settings |
 | `Ctrl+K` | command palette |
+
+---
 
 ## Notes
 

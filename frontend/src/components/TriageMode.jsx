@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { feedback as feedbackApi } from "../lib/api";
 import { categoryColor } from "../lib/utils";
 import { isTypingTarget } from "../lib/shortcuts";
+import RawTextModal from "./RawTextModal";
 
 // Full-screen one-article-at-a-time triage flow. Single-key actions, every
 // action auto-advances — the fastest way to feed the learning loop.
@@ -12,8 +13,11 @@ export default function TriageMode({ items, onClose }) {
   const qc = useQueryClient();
   const [idx, setIdx] = useState(0);
   const [stats, setStats] = useState({ liked: 0, disliked: 0, dismissed: 0, skipped: 0 });
+  const [rawOpen, setRawOpen] = useState(false);
   const done = idx >= items.length;
   const item = items[idx];
+
+  useEffect(() => { setRawOpen(false); }, [idx]);
 
   const advance = useCallback((statKey) => {
     if (statKey) setStats(s => ({ ...s, [statKey]: s[statKey] + 1 }));
@@ -32,6 +36,8 @@ export default function TriageMode({ items, onClose }) {
   useEffect(() => {
     const handler = (e) => {
       if (isTypingTarget(e)) return;
+      if (e.key === "e") { e.preventDefault(); if (!done && item) setRawOpen(v => !v); return; }
+      if (rawOpen) return;  // modal absorbs remaining keys; it handles its own Escape
       if (e.key === "Escape" || e.key === "q" || e.key === "t") { e.preventDefault(); finish(); return; }
       if (done) { if (e.key === "Enter") finish(); return; }
       if (e.key === "u") { e.preventDefault(); act("like"); }
@@ -46,7 +52,7 @@ export default function TriageMode({ items, onClose }) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [act, done, item]);
+  }, [act, done, item, rawOpen]);
 
   const finish = () => {
     qc.invalidateQueries({ queryKey: ["bulletin-today"] });
@@ -135,7 +141,12 @@ export default function TriageMode({ items, onClose }) {
           <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Key k="m" /> dismiss</span>
           <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Key k="j" /> skip</span>
           <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Key k="o" /> open</span>
+          <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Key k="e" /> raw text</span>
         </div>
+      )}
+
+      {rawOpen && item && (
+        <RawTextModal articleId={item.article.id} onClose={() => setRawOpen(false)} />
       )}
     </div>
   );

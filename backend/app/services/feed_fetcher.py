@@ -1,8 +1,14 @@
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Iterator
 import feedparser
 import httpx
+
+# Matches & not already part of a valid XML/HTML entity reference
+_BARE_AMP = re.compile(rb"&(?!(?:[a-zA-Z][a-zA-Z0-9]*|#[0-9]+|#x[0-9a-fA-F]+);)")
+# Characters invalid in XML 1.0 (excluding tab \x09, LF \x0a, CR \x0d)
+_INVALID_XML = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]")
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +36,12 @@ async def fetch_feed(url: str, timeout: int = 20) -> list[dict]:
 
     parsed = feedparser.parse(content)
     if parsed.bozo and not parsed.entries:
-        logger.warning("Feed parse error for %s: %s", url, parsed.bozo_exception)
-        return []
+        sanitized = _INVALID_XML.sub(b"", _BARE_AMP.sub(b"&amp;", content))
+        parsed = feedparser.parse(sanitized)
+        if parsed.bozo and not parsed.entries:
+            logger.warning("Feed parse error for %s: %s", url, parsed.bozo_exception)
+            raise ValueError(f"Feed parse error: {parsed.bozo_exception}")
+        logger.info("Feed recovered after XML sanitization: %s", url)
 
     items = []
     for entry in parsed.entries:

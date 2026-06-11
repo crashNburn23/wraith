@@ -5,8 +5,8 @@ import { articles as articlesApi, enrich, feedback as feedbackApi } from "../lib
 import { Button, Spinner, Input, Textarea, SeverityBadge } from "../components/ui";
 import { formatDate, categoryColor } from "../lib/utils";
 import { useEntityModal } from "../components/EntityModalContext";
-import HighlightedText, { buildHighlights } from "../components/HighlightedText";
 import FeedbackButtons from "../components/FeedbackButtons";
+import RawTextModal from "../components/RawTextModal";
 
 // Muted accent palette for entity sections
 const NEON = {
@@ -174,14 +174,6 @@ export default function ArticleDetail() {
   if (isLoading) return <div className="flex justify-center mt-20"><Spinner size="lg" /></div>;
   if (error || !article) return <div className="p-8 text-red-400 font-mono">Article not found.</div>;
 
-  const entityCtx = {
-    iocs: article.iocs,
-    cve_mentions: article.cve_mentions,
-    actors: article.article_actors?.map(a => ({ name: a.actor_name, ...a })),
-    ttps: article.ttp_tags,
-  };
-  const highlights = buildHighlights(entityCtx, null);
-
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
       {/* Back */}
@@ -254,26 +246,19 @@ export default function ArticleDetail() {
 
       {/* Keyboard hint */}
       <p className="mb-5 text-[10px] font-mono text-slate-700">
-        c close · j/k next/prev · u/n rate · m dismiss · e expand text · y copy url · ? help
+        c close · j/k next/prev · u/n rate · m dismiss · e raw text · y copy url · ? help
       </p>
 
-      {/* Scraped text — gated behind disclosure, [e] toggles */}
       {article.scraped_text && (
-        <details
-          className="group"
-          open={rawOpen}
-          onToggle={(e) => setRawOpen(e.currentTarget.open)}
+        <button
+          onClick={() => setRawOpen(true)}
+          className="text-[11px] font-mono text-slate-600 hover:text-slate-400 transition-colors flex items-center gap-1.5"
         >
-          <summary className="text-[11px] text-slate-600 hover:text-slate-400 font-mono cursor-pointer select-none list-none flex items-center gap-1.5 mb-2">
-            <span className="transition-transform group-open:rotate-90 inline-block">▶</span>
-            {rawOpen ? "Hide full article text [e]" : "Show full article text [e]"}
-          </summary>
-          <div className="p-4 rounded-xl mt-2" style={neonCard(NEON.brand)}>
-            <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 font-mono mb-3">Raw Source Text</div>
-            <HighlightedText text={article.scraped_text} highlights={highlights} primaryValue={null} />
-          </div>
-        </details>
+          <span>▶</span> Show full article text <kbd className="text-[10px] bg-navy-900 border border-navy-border rounded px-1 py-0.5">e</kbd>
+        </button>
       )}
+
+      {rawOpen && <RawTextModal articleId={id} onClose={() => setRawOpen(false)} />}
     </div>
   );
 }

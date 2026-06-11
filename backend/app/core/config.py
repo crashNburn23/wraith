@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     BULLETIN_HOUR: int = 10
 
     # Auth
-    SECRET_KEY: str = "change-me-in-production"
+    SECRET_KEY: str = "change-me-in-production-wraith-01"
     AUTH_USERNAME: str = "admin"
     AUTH_PASSWORD: str = "wraith"
 
