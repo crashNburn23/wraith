@@ -8,7 +8,7 @@ No cloud required. Runs entirely on localhost against a local Ollama model.
 
 ---
 
-<video src="docs/screenshots/overview.webm" autoplay loop muted playsinline width="100%"></video>
+![Wraith demo](docs/screenshots/overview.gif)
 
 ---
 
