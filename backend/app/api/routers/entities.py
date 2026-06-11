@@ -52,6 +52,7 @@ def cve_context(cve_id: str, db: Session = Depends(get_db)):
             "in_kev": record.in_kev,
             "kev_due_date": record.kev_due_date,
             "nvd_description": record.nvd_description,
+            "ai_summary": record.ai_summary,
         } if record else None,
         "articles": articles,
     }

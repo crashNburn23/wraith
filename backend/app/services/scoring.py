@@ -5,14 +5,30 @@ Recommended score for bulletin items — two-axis model.
   Relevance axis: w_fb   × feedback_signal  +  w_profile × profile_match  +  w_rec × recency
 
 All weights read from scoring_config; must sum to 1.0.
+
+Feedback signal sources (strongest to weakest):
+  explicit 👍/👎 rating  → ±1.0
+  dismissed article      → −1.0 (implicit)
+  acknowledged/opened    → +0.4 (implicit)
+
+The expensive feedback/KEV/watchlist lookups are hoisted into a
+FeedbackContext built once per bulletin build (previously these queries ran
+per scored article — O(articles × feedback)).
 """
 import math
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
-from app.models import Article, Feedback, ReadStatus, CVEMention, CVERecord, ScoringConfig, UserProfile
+from app.models import (
+    Article, Feedback, ReadStatus, CVERecord, ScoringConfig, UserProfile, WatchlistItem,
+)
+from app.services.embeddings import cosine
 
 logger = logging.getLogger(__name__)
+
+ACKNOWLEDGED_SIGNAL = 0.4   # implicit positive weight for opened/acknowledged articles
+SEMANTIC_SIM_THRESHOLD = 0.55
 
 
 def _get_config(db: Session) -> ScoringConfig:
@@ -25,6 +41,67 @@ def _get_config(db: Session) -> ScoringConfig:
     return cfg
 
 
+def _get_profile(db: Session) -> UserProfile:
+    p = db.query(UserProfile).filter(UserProfile.id == 1).first()
+    if not p:
+        p = UserProfile(id=1, sectors=[], threat_actors=[], categories=[], keywords=[])
+        db.add(p)
+        db.commit()
+        db.refresh(p)
+    return p
+
+
+@dataclass
+class FeedbackContext:
+    """Everything _feedback_signal/_kev_bonus/_profile_match need, fetched once."""
+    signal_rows: dict = field(default_factory=dict)   # article_id → (rating: float, ts, reason_tags)
+    past_articles: list = field(default_factory=list)
+    kev_cves: set = field(default_factory=set)
+    watch_actors: set = field(default_factory=set)    # lowercase actor names/values
+    watch_cves: set = field(default_factory=set)
+    watch_keywords: set = field(default_factory=set)
+
+
+def build_feedback_context(db: Session, config: ScoringConfig) -> FeedbackContext:
+    ctx = FeedbackContext()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=config.feedback_lookback_days)
+
+    # Explicit non-zero ratings — use updated_at so a re-rating counts freshly
+    for f in db.query(Feedback).filter(Feedback.rating != 0, Feedback.updated_at >= cutoff).all():
+        ctx.signal_rows[f.article_id] = (float(f.rating), f.updated_at, f.reason_tags or [])
+
+    # Implicit signals from read status, skipping explicitly rated articles:
+    #   dismissed → −1.0   acknowledged (opened/read) → +ACKNOWLEDGED_SIGNAL
+    for rs in db.query(ReadStatus).filter(
+        ReadStatus.status.in_(["dismissed", "acknowledged"]),
+        ReadStatus.updated_at >= cutoff,
+    ).all():
+        if rs.article_id in ctx.signal_rows:
+            continue
+        rating = -1.0 if rs.status == "dismissed" else ACKNOWLEDGED_SIGNAL
+        ctx.signal_rows[rs.article_id] = (rating, rs.updated_at, [])
+
+    if ctx.signal_rows:
+        ctx.past_articles = (
+            db.query(Article).filter(Article.id.in_(ctx.signal_rows.keys())).all()
+        )
+
+    ctx.kev_cves = {
+        r.cve_id for r in db.query(CVERecord).filter(CVERecord.in_kev == True).all()
+    }
+
+    for w in db.query(WatchlistItem).all():
+        v = w.value.lower().strip()
+        if w.item_type == "actor":
+            ctx.watch_actors.add(v)
+        elif w.item_type == "cve":
+            ctx.watch_cves.add(v)
+        else:
+            ctx.watch_keywords.add(v)
+
+    return ctx
+
+
 def _recency_factor(published_at: datetime | None, half_life_days: float) -> float:
     if not published_at:
         return 0.5
@@ -35,95 +112,57 @@ def _recency_factor(published_at: datetime | None, half_life_days: float) -> flo
     return math.exp(-math.log(2) * age_days / half_life_days)
 
 
-def _kev_bonus(db: Session, article: Article) -> float:
-    cve_ids = [m.cve_id for m in article.cve_mentions]
-    if not cve_ids:
-        return 0.0
-    kev_count = (
-        db.query(CVERecord)
-        .filter(CVERecord.cve_id.in_(cve_ids), CVERecord.in_kev == True)
-        .count()
-    )
-    return 1.0 if kev_count > 0 else 0.0
+def _kev_bonus(article: Article, ctx: FeedbackContext) -> float:
+    return 1.0 if any(m.cve_id in ctx.kev_cves for m in article.cve_mentions) else 0.0
+
+
+_QUALITY_TAGS = {"too_vague", "not_actionable"}
+_FEATURE_TAG_MAP = {
+    "wrong_category": lambda r: r.startswith("category:"),
+    "wrong_sector":   lambda r: r == "shared_sector",
+    "wrong_actor":    lambda r: r == "shared_actor",
+    "wrong_ttp":      lambda r: r.startswith("ttp:"),
+    "wrong_geo":      lambda r: r == "shared_geo",
+}
 
 
 def _feedback_signal(
-    db: Session,
     article: Article,
-    lookback_days: int,
+    ctx: FeedbackContext,
     min_feedback_articles: int,
     decay_half_life_days: float,
 ) -> tuple[float, list[dict]]:
     """
-    Returns (signal_0_to_1, contributing_articles[])
+    Returns (signal_0_to_1, contributing_articles[]).
 
-    Combines explicit ratings (👍/👎) and implicit dismissed signals.
-    Each signal is weighted by feature overlap and exponential time decay.
+    Each past signal is weighted by feature overlap (or semantic similarity
+    when embeddings exist) and exponential time decay.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-    now = datetime.now(timezone.utc)
-
-    # Explicit non-zero ratings — use updated_at so a re-rating counts freshly
-    past_feedback = (
-        db.query(Feedback)
-        .filter(Feedback.rating != 0, Feedback.updated_at >= cutoff)
-        .all()
-    )
-    # article_id -> (rating, timestamp, reason_tags)
-    explicit_map: dict[str, tuple[int, datetime, list]] = {
-        f.article_id: (f.rating, f.updated_at, f.reason_tags or []) for f in past_feedback
-    }
-
-    # Dismissed articles = implicit -1, skip any already explicitly rated
-    dismissed_q = db.query(ReadStatus).filter(
-        ReadStatus.status == "dismissed",
-        ReadStatus.updated_at >= cutoff,
-    )
-    if explicit_map:
-        dismissed_q = dismissed_q.filter(
-            ~ReadStatus.article_id.in_(list(explicit_map.keys()))
-        )
-    dismissed = dismissed_q.all()
-
-    # Merge: dismissed articles carry no reason_tags (implicit signal)
-    signal_rows: dict[str, tuple[int, datetime, list]] = dict(explicit_map)
-    for d in dismissed:
-        signal_rows[d.article_id] = (-1, d.updated_at, [])
-
-    if len(signal_rows) < min_feedback_articles:
+    if len(ctx.signal_rows) < min_feedback_articles:
         return 0.0, []
 
-    past_articles = db.query(Article).filter(Article.id.in_(signal_rows.keys())).all()
+    now = datetime.now(timezone.utc)
 
     target_category = article.threat_category or ""
     target_ttps = {t.technique_id for t in article.ttp_tags}
     target_actors = {aa.actor_id for aa in article.article_actors}
     target_sectors = set(article.sector_targets or [])
     target_geo = {g.lower() for g in (article.geo_targets or [])}
+    target_emb = article.embedding
 
     contributors = []
     weighted_sum = 0.0
     weight_total = 0.0
 
-    _QUALITY_TAGS = {"too_vague", "not_actionable"}
-    _FEATURE_TAG_MAP = {
-        "wrong_category": lambda r: r.startswith("category:"),
-        "wrong_sector":   lambda r: r == "shared_sector",
-        "wrong_actor":    lambda r: r == "shared_actor",
-        "wrong_ttp":      lambda r: r.startswith("ttp:"),
-        "wrong_geo":      lambda r: r == "shared_geo",
-    }
-
-    for past in past_articles:
-        rating, ts, reason_tags = signal_rows[past.id]
+    for past in ctx.past_articles:
+        rating, ts, reason_tags = ctx.signal_rows[past.id]
         overlap_reasons = []
 
         if past.threat_category and past.threat_category == target_category:
             overlap_reasons.append(f"category:{target_category}")
 
         past_ttps = {t.technique_id for t in past.ttp_tags}
-        shared_ttps = target_ttps & past_ttps
-        for t in shared_ttps:
+        for t in target_ttps & past_ttps:
             overlap_reasons.append(f"ttp:{t}")
 
         past_actors = {aa.actor_id for aa in past.article_actors}
@@ -137,6 +176,14 @@ def _feedback_signal(
         past_geo = {g.lower() for g in (past.geo_targets or [])}
         if target_geo & past_geo:
             overlap_reasons.append("shared_geo")
+
+        # Semantic similarity (when both articles have embeddings) catches
+        # paraphrased topics the exact-match features miss.
+        sim = 0.0
+        if target_emb and past.embedding:
+            sim = cosine(target_emb, past.embedding)
+            if sim >= SEMANTIC_SIM_THRESHOLD:
+                overlap_reasons.append(f"semantic:{round(sim, 2)}")
 
         if not overlap_reasons:
             continue
@@ -157,7 +204,14 @@ def _feedback_signal(
                 if not overlap_reasons:
                     continue  # tagged dimensions don't overlap — skip signal
 
-        overlap_score = len(overlap_reasons) / max(len(target_ttps) + 2, 1)
+        feature_overlap = len(overlap_reasons) / max(len(target_ttps) + 2, 1)
+        # Semantic similarity can carry the overlap on its own:
+        # rescale [threshold, 1.0] → [0, 1] and take the stronger evidence.
+        semantic_overlap = (
+            (sim - SEMANTIC_SIM_THRESHOLD) / (1 - SEMANTIC_SIM_THRESHOLD)
+            if sim >= SEMANTIC_SIM_THRESHOLD else 0.0
+        )
+        overlap_score = max(feature_overlap, semantic_overlap)
 
         # Exponential decay — older feedback weighs less
         ts_aware = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
@@ -190,18 +244,9 @@ def _feedback_signal(
     return round(signal, 4), contributors
 
 
-def _get_profile(db: Session) -> UserProfile:
-    p = db.query(UserProfile).filter(UserProfile.id == 1).first()
-    if not p:
-        p = UserProfile(id=1, sectors=[], threat_actors=[], categories=[], keywords=[])
-        db.add(p)
-        db.commit()
-        db.refresh(p)
-    return p
-
-
-def _profile_match(article: Article, profile: UserProfile) -> float:
-    """Average overlap across whichever profile dimensions are non-empty."""
+def _profile_match(article: Article, profile: UserProfile, ctx: FeedbackContext | None = None) -> float:
+    """Average overlap across whichever profile dimensions are non-empty.
+    Watchlist hits (pinned actors/CVEs/keywords) force a full relevance match."""
     scores = []
 
     # Sectors
@@ -240,7 +285,22 @@ def _profile_match(article: Article, profile: UserProfile) -> float:
         a_origin = (article.geo_origin or "").lower()
         scores.append(1.0 if a_origin in p_geo_origins else 0.0)
 
-    return round(sum(scores) / len(scores), 4) if scores else 0.0
+    base = round(sum(scores) / len(scores), 4) if scores else 0.0
+
+    # Watchlist override
+    if ctx and (ctx.watch_actors or ctx.watch_cves or ctx.watch_keywords):
+        a_actors = {aa.actor.name.lower() for aa in article.article_actors if aa.actor}
+        a_cves = {m.cve_id.lower() for m in article.cve_mentions}
+        text = f"{article.title} {article.ai_summary or ''}".lower()
+        hit = (
+            (a_actors & ctx.watch_actors)
+            or (a_cves & ctx.watch_cves)
+            or any(kw in text for kw in ctx.watch_keywords)
+        )
+        if hit:
+            return 1.0
+
+    return base
 
 
 def compute_score(
@@ -248,26 +308,30 @@ def compute_score(
     article: Article,
     config: ScoringConfig | None = None,
     profile: UserProfile | None = None,
+    ctx: FeedbackContext | None = None,
 ) -> dict:
     """
     Returns a dict with the full score breakdown ready to store in bulletin_items.
+    Pass a prebuilt ctx when scoring many articles — it avoids re-running the
+    feedback/KEV/watchlist queries per article.
     """
     if config is None:
         config = _get_config(db)
     if profile is None:
         profile = _get_profile(db)
+    if ctx is None:
+        ctx = build_feedback_context(db, config)
 
     raw_sev = (article.ai_severity_score or 0.0) / 100.0
-    raw_kev = _kev_bonus(db, article)
+    raw_kev = _kev_bonus(article, ctx)
     raw_rec = _recency_factor(article.published_at, config.recency_half_life_days)
     raw_fb, fb_articles = _feedback_signal(
-        db,
         article,
-        config.feedback_lookback_days,
+        ctx,
         config.min_feedback_articles,
         config.feedback_decay_half_life_days,
     )
-    raw_pm = _profile_match(article, profile)
+    raw_pm = _profile_match(article, profile, ctx)
 
     score_sev = config.weight_ai_severity * raw_sev
     score_kev = config.weight_kev_bonus * raw_kev

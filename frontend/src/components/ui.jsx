@@ -16,6 +16,25 @@ export function Button({ children, onClick, variant = "primary", size = "md", di
   );
 }
 
+// Unified severity treatment — use this everywhere a 0–100 severity appears
+// (bulletin, article detail, Intel Hub, CVE tab) instead of per-page styles.
+export function SeverityBadge({ score, prefix = "sev", title }) {
+  if (score == null) return null;
+  const cls =
+    score >= 75 ? "bg-red-900/40 text-red-300 border-red-500/30" :
+    score >= 50 ? "bg-orange-900/40 text-orange-300 border-orange-500/30" :
+    score >= 25 ? "bg-yellow-900/40 text-yellow-300 border-yellow-500/25" :
+                  "bg-green-900/40 text-green-300 border-green-500/25";
+  return (
+    <span
+      className={`text-[10px] px-2 py-0.5 rounded font-mono border ${cls}`}
+      title={title || `AI-assigned severity ${Math.round(score)}/100`}
+    >
+      {prefix} {Math.round(score)}
+    </span>
+  );
+}
+
 export function Badge({ children, color = "gray" }) {
   const colors = {
     gray:   "bg-navy-700 text-slate-400 border border-navy-border",

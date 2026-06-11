@@ -76,9 +76,10 @@ def _build_user_message(title: str, text: str) -> str:
     return f"Title: {title}\n\n{body}"
 
 
-async def enrich_article(title: str, text: str) -> EnrichmentResult:
+async def enrich_article(title: str, text: str, corrections_block: str = "") -> EnrichmentResult:
     client = get_llm_client()
     user_msg = _build_user_message(title, text)
+    system_prompt = SYSTEM_PROMPT + (corrections_block or "")
 
     try:
         if is_anthropic():
@@ -86,7 +87,7 @@ async def enrich_article(title: str, text: str) -> EnrichmentResult:
                 model=settings.LLM_MODEL,
                 max_tokens=2000,
                 temperature=0,
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 messages=[{"role": "user", "content": user_msg}],
             )
             raw = response.content[0].text.strip()
@@ -97,7 +98,7 @@ async def enrich_article(title: str, text: str) -> EnrichmentResult:
                 max_tokens=2000,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_msg},
                 ],
             )
@@ -114,8 +115,10 @@ async def enrich_article(title: str, text: str) -> EnrichmentResult:
         return EnrichmentResult(**data)
 
     except json.JSONDecodeError as e:
+        # Raise so the caller marks the article 'error' and it gets retried —
+        # never store a half-empty result as 'enriched'.
         logger.warning("Enrichment JSON parse error for '%s': %s", title[:60], e)
-        return EnrichmentResult(summary="Failed to parse LLM response.")
+        raise ValueError(f"LLM returned unparseable JSON: {e}") from e
     except Exception as e:
         logger.error("Enrichment LLM call failed for '%s': %s", title[:60], e)
         raise

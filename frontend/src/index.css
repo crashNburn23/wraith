@@ -28,3 +28,20 @@
     @apply absolute inset-y-0 left-0 w-0.5 bg-brand-500 rounded-l;
   }
 }
+
+@layer components {
+  /* Markdown rendering inside chat bubbles */
+  .chat-markdown p { @apply mb-2 last:mb-0; }
+  .chat-markdown ul, .chat-markdown ol { @apply mb-2 ml-4 space-y-0.5; }
+  .chat-markdown ul { @apply list-disc; }
+  .chat-markdown ol { @apply list-decimal; }
+  .chat-markdown code { @apply font-mono text-[12px] bg-navy-900 border border-navy-border rounded px-1 py-0.5 text-brand-300; }
+  .chat-markdown pre { @apply bg-navy-900 border border-navy-border rounded-lg p-3 mb-2 overflow-x-auto; }
+  .chat-markdown pre code { @apply bg-transparent border-0 p-0; }
+  .chat-markdown h1, .chat-markdown h2, .chat-markdown h3 { @apply font-semibold text-white mt-3 mb-1.5 text-sm; }
+  .chat-markdown a { @apply text-brand-400 hover:text-brand-300 underline underline-offset-2; }
+  .chat-markdown strong { @apply text-white; }
+  .chat-markdown blockquote { @apply border-l-2 border-navy-border pl-3 text-slate-400 mb-2; }
+  .chat-markdown table { @apply text-xs mb-2; }
+  .chat-markdown th, .chat-markdown td { @apply border border-navy-border px-2 py-1; }
+}

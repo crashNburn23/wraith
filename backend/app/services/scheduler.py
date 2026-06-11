@@ -1,4 +1,7 @@
+import asyncio
 import logging
+
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.core.config import settings
 from app.services import job_state
@@ -14,12 +17,31 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
+async def _push_brief(brief: str | None) -> None:
+    """POST the daily brief to an ntfy-style webhook if configured."""
+    if not brief or not settings.BRIEF_WEBHOOK_URL:
+        return
+    # Strip the machine-readable SOURCES suffix
+    text = brief.split("\n\nSOURCES:")[0]
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.post(
+                settings.BRIEF_WEBHOOK_URL,
+                content=text.encode(),
+                headers={"Title": "Wraith daily brief"},
+            )
+        logger.info("Daily brief pushed to webhook")
+    except Exception as e:
+        logger.warning("Brief webhook push failed: %s", e)
+
+
 def start_scheduler(app) -> None:
     from app.db.session import SessionLocal
     from app.services.ingest_runner import run_ingest
     from app.services.enrichment_runner import run_enrich_batch
     from app.services.cve_enrichment import sync_cves_for_articles
     from app.services.bulletin import build_bulletin
+    from app.services.brief import generate_brief
     from app.services.pruning import prune
 
     scheduler = get_scheduler()
@@ -40,6 +62,12 @@ def start_scheduler(app) -> None:
         if run and run.status == "running":
             logger.info("Skipping scheduled enrichment — already running")
             return
+        # Respect a user-initiated pause: a scheduled run must not silently
+        # override it. Resume from the UI clears the flag.
+        if job_state.is_paused("enrich"):
+            logger.info("Skipping scheduled enrichment — paused by user")
+            return
+        job_state.set_stopped("enrich", False)
         db = SessionLocal()
         try:
             await run_enrich_batch(db)
@@ -53,10 +81,13 @@ def start_scheduler(app) -> None:
         finally:
             db.close()
 
-    def _bulletin():
+    async def _bulletin():
         db = SessionLocal()
         try:
-            build_bulletin(db)
+            # build_bulletin is sync/blocking — keep it off the event loop
+            await asyncio.to_thread(build_bulletin, db)
+            brief = await generate_brief(db)
+            await _push_brief(brief)
         finally:
             db.close()
 

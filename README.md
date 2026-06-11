@@ -18,13 +18,17 @@ No cloud required. Runs entirely on localhost against a local Ollama model.
 
 ## What it does
 
-- **Daily Bulletin** — articles ranked by a combined threat severity + personal relevance score. Thumbnails pulled from feed media or article OG images. Paginated, filterable, dismissable.
-- **Feedback loop** — 👍/👎 on any article (bulletin or article detail page) feeds back into tomorrow's ranking. Activates after a few signals. Reason tags let you be specific about why something was irrelevant.
-- **Interest Profile** — declare sectors, threat actors, categories, and keywords. Scores every article from day one without needing any ratings first.
-- **LLM Enrichment** — extracts summary, threat category, severity, sector targets, IOCs, MITRE TTPs, threat actors, and CVE mentions from each article.
-- **Intel Hub** — search across articles, IOCs, CVEs, and actors.
-- **RAG Chat** — ask questions against your intel database.
-- **Score breakdown** — click the score bubble on any bulletin card to see how the score was computed.
+- **Daily Bulletin** — new articles ranked by a combined threat severity + personal relevance score, in a two-pane reader with the AI daily brief. Only genuinely new articles each day (capped at `BULLETIN_MAX_ITEMS`).
+- **Feedback loop** — 👍/👎, dismissals, and even just *opening* an article feed back into tomorrow's ranking. Reason tags let you be specific about why something was irrelevant.
+- **Triage mode** — press `t` for a full-screen, one-key-per-article review flow with auto-advance and end-of-session stats.
+- **Learning enrichment** — analyst corrections (deleted IOCs, whitelisted domains, edited entities) are fed back into the enrichment prompt as do-not-repeat examples.
+- **Interest Profile + Watchlist** — declare sectors, actors, categories, keywords; pin actors/CVEs to the watchlist for a guaranteed relevance boost.
+- **Suggested weights** — one click analyzes your rating history and proposes scoring weights that match what you actually read.
+- **LLM Enrichment** — summary, threat category, severity, sector targets, IOCs, MITRE TTPs, threat actors, CVE mentions; optional semantic embeddings for similarity scoring and chat retrieval.
+- **Intel Hub** — search across articles, IOCs, CVEs (with plain-English AI summaries), and actors.
+- **RAG Chat** — ask questions against your intel database; semantic retrieval when embeddings are enabled, with markdown rendering.
+- **Command palette & keyboard-first UI** — `Ctrl+K` palette, `g`-chords for page navigation, full one-handed bulletin triage (`?` shows the cheat sheet).
+- **Score breakdown** — click any score bubble to see exactly how it was computed, including which past ratings drove it.
 
 ---
 
@@ -79,11 +83,18 @@ LLM_MODEL=qwen2.5:7b
 # ANTHROPIC_API_KEY=sk-ant-...
 # LLM_MODEL=claude-sonnet-4-5
 
+# Optional but recommended: semantic embeddings (ollama pull nomic-embed-text)
+# Enables semantic chat retrieval + similarity-based feedback signals
+EMBEDDING_MODEL=nomic-embed-text
+
 # Optional: NVD API key for higher rate limits on CVE lookups
 NVD_API_KEY=
 
-ENRICH_BATCH_SIZE=5
 ENRICH_DELAY_SECONDS=0
+BULLETIN_MAX_ITEMS=30
+
+# Optional: push the daily brief to an ntfy-style webhook each morning
+# BRIEF_WEBHOOK_URL=https://ntfy.sh/your-topic
 
 # Scheduled jobs (UTC hours)
 INGEST_HOUR=7
@@ -112,12 +123,34 @@ To use PostgreSQL instead of SQLite, just swap `DATABASE_URL` and run `./start.s
 
 ---
 
+## Keyboard shortcuts
+
+Press `?` anywhere for the full cheat sheet. The bulletin is designed for **one-handed triage** — everything sits in the right-hand home cluster:
+
+| Key | Action |
+|---|---|
+| `j` / `k` | next / previous article |
+| `h` or `Esc` | back to the daily brief |
+| `o` or `Enter` | open full article page |
+| `m` | dismiss + advance |
+| `u` / `n` | thumbs up / down + advance |
+| `i` | cycle read status |
+| `Space` / `Shift+Space` | scroll the reading pane |
+| `,` / `.` | previous / next page |
+| `1`–`9` | jump to rank N |
+| `y` | copy source URL |
+| `t` | triage mode |
+| `g` then `b`/`i`/`c`/`f`/`s` | go to Bulletin / Intel / Chat / Feedback / Settings |
+| `Ctrl+K` | command palette |
+
 ## Notes
 
-- Enrichment is slow on CPU (~30–90s per article). If you're CPU-only, set `ENRICH_BATCH_SIZE=1`.
+- Enrichment is slow on CPU (~30–90s per article). Use `ENRICH_DELAY_SECONDS` to pace it.
 - `qwen2.5:14b` gives meaningfully better extraction quality if you have the VRAM for it.
 - Ollama handles one inference at a time — chat requests will queue if enrichment is running.
 - The weekly pruning job (Sunday 03:00 UTC) clears scraped text from old articles and removes stale unenriched ones. Run it manually from Settings → Storage & Retention.
+- Validate prompt/model changes with the eval harness: `python -m scripts.eval_enrichment` (from `backend/`).
+- Run the test suite with `python -m pytest tests/` (from `backend/`).
 
 ---
 

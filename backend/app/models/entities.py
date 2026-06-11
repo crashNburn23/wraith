@@ -77,3 +77,4 @@ class CVERecord(Base, TimestampMixin):
     in_kev: Mapped[bool] = mapped_column(default=False)
     kev_due_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
     nvd_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)  # plain-English one-liner

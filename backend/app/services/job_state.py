@@ -1,11 +1,16 @@
 """
-In-memory job state for ingest and enrichment runs.
-Single-user local tool — no persistence needed across restarts.
+Job state for ingest and enrichment runs.
+
+In-memory dataclasses remain the hot-path working objects, but every mutation
+is persisted to the job_runs / job_flags tables so state survives server
+restarts (no more phantom RUNNING jobs after a uvicorn reload).
 """
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 import threading
+
+from app.db.base import new_uuid
 
 _lock = threading.Lock()
 
@@ -30,7 +35,8 @@ class SourceResult:
 @dataclass
 class JobRun:
     job_type: str        # "ingest" | "enrich"
-    status: str          # "running" | "paused" | "completed" | "error" | "idle"
+    status: str          # "running" | "paused" | "stopped" | "completed" | "error" | "interrupted"
+    id: str = field(default_factory=new_uuid)
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: Optional[datetime] = None
 
@@ -47,7 +53,10 @@ class JobRun:
 
     def elapsed_seconds(self) -> float:
         end = self.finished_at or datetime.now(timezone.utc)
-        return round((end - self.started_at).total_seconds(), 1)
+        started = self.started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        return round((end - started).total_seconds(), 1)
 
     def to_dict(self) -> dict:
         d = {
@@ -84,39 +93,119 @@ class JobRun:
         return d
 
 
-# Module-level state
+# In-memory mirror of the active run per job type (hot path)
 _runs: dict[str, Optional[JobRun]] = {"ingest": None, "enrich": None}
-_paused: dict[str, bool] = {"enrich": False}
-_stopped: dict[str, bool] = {"enrich": False}
 
+
+# ─── Persistence helpers ──────────────────────────────────────────────────────
+
+def _persist(run: JobRun) -> None:
+    from app.db.session import SessionLocal
+    from app.models import JobRunRecord
+    with SessionLocal() as s:
+        row = s.get(JobRunRecord, run.id)
+        if not row:
+            row = JobRunRecord(id=run.id, job_type=run.job_type, started_at=run.started_at)
+            s.add(row)
+        row.status = run.status
+        row.finished_at = run.finished_at
+        row.payload = run.to_dict()
+        s.commit()
+
+
+def _load_latest(job_type: str) -> Optional[JobRun]:
+    """Reconstruct the most recent run from the DB after a restart.
+    A row still marked 'running' means the process died mid-run — mark it interrupted."""
+    from app.db.session import SessionLocal
+    from app.models import JobRunRecord
+    with SessionLocal() as s:
+        row = (
+            s.query(JobRunRecord)
+            .filter(JobRunRecord.job_type == job_type)
+            .order_by(JobRunRecord.started_at.desc())
+            .first()
+        )
+        if not row:
+            return None
+        if row.status == "running":
+            row.status = "interrupted"
+            if row.payload:
+                row.payload = {**row.payload, "status": "interrupted"}
+            s.commit()
+        p = row.payload or {}
+        run = JobRun(job_type=job_type, status=row.status, id=row.id)
+        run.started_at = row.started_at
+        run.finished_at = row.finished_at
+        run.total = p.get("total", 0)
+        run.processed = p.get("processed", 0)
+        run.succeeded = p.get("succeeded", 0)
+        run.failed = p.get("failed", 0)
+        run.current_title = None
+        run.errors = [ArticleError(**e) for e in p.get("errors", [])]
+        run.source_results = [SourceResult(**r) for r in p.get("source_results", [])]
+        return run
+
+
+def _get_flag_row(s, job_type: str):
+    from app.models import JobFlag
+    row = s.get(JobFlag, job_type)
+    if not row:
+        row = JobFlag(job_type=job_type, paused=False, stopped=False)
+        s.add(row)
+        s.commit()
+    return row
+
+
+# ─── Public API ───────────────────────────────────────────────────────────────
 
 def start_run(job_type: str, total: int = 0) -> JobRun:
     with _lock:
         run = JobRun(job_type=job_type, status="running", total=total)
         _runs[job_type] = run
-        return run
+    _persist(run)
+    return run
+
+
+def save_run(run: JobRun) -> None:
+    """Checkpoint progress to the DB (call after each article / source)."""
+    _persist(run)
 
 
 def get_run(job_type: str) -> Optional[JobRun]:
-    return _runs.get(job_type)
+    run = _runs.get(job_type)
+    if run is None:
+        run = _load_latest(job_type)
+        if run:
+            _runs[job_type] = run
+    return run
 
 
 def is_paused(job_type: str = "enrich") -> bool:
-    return _paused.get(job_type, False)
+    from app.db.session import SessionLocal
+    with SessionLocal() as s:
+        return _get_flag_row(s, job_type).paused
 
 
 def set_paused(job_type: str, paused: bool) -> None:
-    with _lock:
-        _paused[job_type] = paused
+    from app.db.session import SessionLocal
+    with SessionLocal() as s:
+        row = _get_flag_row(s, job_type)
+        row.paused = paused
+        s.commit()
 
 
 def is_stopped(job_type: str = "enrich") -> bool:
-    return _stopped.get(job_type, False)
+    from app.db.session import SessionLocal
+    with SessionLocal() as s:
+        return _get_flag_row(s, job_type).stopped
 
 
 def set_stopped(job_type: str, stopped: bool) -> None:
-    with _lock:
-        _stopped[job_type] = stopped
+    from app.db.session import SessionLocal
+    with SessionLocal() as s:
+        row = _get_flag_row(s, job_type)
+        row.stopped = stopped
+        s.commit()
 
 
 def finish_run(run: JobRun, status: str = "completed") -> None:
@@ -124,3 +213,4 @@ def finish_run(run: JobRun, status: str = "completed") -> None:
         run.status = status
         run.current_title = None
         run.finished_at = datetime.now(timezone.utc)
+    _persist(run)

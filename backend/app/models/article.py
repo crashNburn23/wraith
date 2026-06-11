@@ -29,6 +29,10 @@ class Article(Base, TimestampMixin):
     geo_origin: Mapped[str | None] = mapped_column(String(100), nullable=True)
     geo_targets: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
+    # Semantic embedding of title+summary (list of floats), set at enrichment
+    # time when EMBEDDING_MODEL is configured. Used for RAG + feedback similarity.
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     # Relationships
     source = relationship("Source", back_populates="articles")
     iocs = relationship("IOC", back_populates="article", cascade="all, delete-orphan")

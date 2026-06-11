@@ -32,6 +32,7 @@ export const auth = {
 
 export const sources = {
   list: () => api.get("/sources").then(r => r.data),
+  stats: () => api.get("/sources/stats").then(r => r.data),
   create: (body) => api.post("/sources", body).then(r => r.data),
   update: (id, body) => api.patch(`/sources/${id}`, body).then(r => r.data),
   delete: (id) => api.delete(`/sources/${id}`),
@@ -72,11 +73,11 @@ export const bulletin = {
   today: () => api.get("/bulletin/today").then(r => r.data),
   history: () => api.get("/bulletin/history").then(r => r.data),
   get: (date) => api.get(`/bulletin/${date}`).then(r => r.data),
-  build: () => api.post("/bulletin/build").then(r => r.data),
+  build: (includeAll = false) => api.post("/bulletin/build", { include_all: includeAll }).then(r => r.data),
   generateBrief: () => api.post("/bulletin/brief/generate").then(r => r.data),
   scoreBreakdown: (itemId) => api.get(`/bulletin/items/${itemId}/score-breakdown`).then(r => r.data),
   rebuildItemScore: (itemId) => api.post(`/bulletin/rebuild-item/${itemId}`).then(r => r.data),
-  rebuildScores: () => api.post("/bulletin/rebuild-scores").then(r => r.data),
+  rebuildScores: (scope = "today") => api.post(`/bulletin/rebuild-scores?scope=${scope}`).then(r => r.data),
 };
 
 export const feedback = {
@@ -109,11 +110,16 @@ export const settings = {
   getScoring: () => api.get("/settings/scoring").then(r => r.data),
   updateScoring: (body) => api.patch("/settings/scoring", body).then(r => r.data),
   resetScoring: () => api.post("/settings/scoring/reset").then(r => r.data),
+  suggestWeights: () => api.get("/settings/scoring/suggest").then(r => r.data),
   feedbackSignal: () => api.get("/settings/feedback-signal").then(r => r.data),
   scheduler: () => api.get("/settings/scheduler").then(r => r.data),
   prune: () => api.post("/settings/prune").then(r => r.data),
   getProfile: () => api.get("/settings/profile").then(r => r.data),
   updateProfile: (body) => api.patch("/settings/profile", body).then(r => r.data),
+  getWatchlist: () => api.get("/settings/watchlist").then(r => r.data),
+  addWatchlist: (item_type, value) => api.post("/settings/watchlist", { item_type, value }).then(r => r.data),
+  removeWatchlist: (id) => api.delete(`/settings/watchlist/${id}`).then(r => r.data),
+  refreshBenignDomains: () => api.post("/settings/benign-domains/refresh").then(r => r.data),
 };
 
 export const chat = {

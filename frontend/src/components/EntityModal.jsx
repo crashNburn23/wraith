@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { entities as entitiesApi } from "../lib/api";
+import { entities as entitiesApi, settings as settingsApi } from "../lib/api";
 import { Spinner } from "./ui";
 import HighlightedText, { buildHighlights } from "./HighlightedText";
 import { formatDate } from "../lib/utils";
@@ -55,6 +55,41 @@ function SectionHeader({ count, label, neon }) {
 
 function Empty({ text }) {
   return <p className="text-sm text-slate-600 italic py-2 font-mono">{text}</p>;
+}
+
+// Pin an actor/CVE to the watchlist — matching articles get a relevance boost
+function WatchButton({ itemType, value, neon }) {
+  const qc = useQueryClient();
+  const { data: watchlist } = useQuery({ queryKey: ["watchlist"], queryFn: settingsApi.getWatchlist });
+  const existing = (watchlist || []).find(
+    w => w.item_type === itemType && w.value.toLowerCase() === (value || "").toLowerCase()
+  );
+
+  const addMut = useMutation({
+    mutationFn: () => settingsApi.addWatchlist(itemType, value),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlist"] }),
+  });
+  const delMut = useMutation({
+    mutationFn: () => settingsApi.removeWatchlist(existing.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlist"] }),
+  });
+
+  if (!value) return null;
+  return (
+    <button
+      onClick={() => (existing ? delMut.mutate() : addMut.mutate())}
+      disabled={addMut.isPending || delMut.isPending}
+      className="text-[10px] font-mono px-2 py-1 rounded border transition-colors flex-shrink-0"
+      style={{
+        color: existing ? neon.hex : "rgba(148,163,184,0.7)",
+        borderColor: existing ? neon.border : "rgba(148,163,184,0.25)",
+        background: existing ? neon.dim : "transparent",
+      }}
+      title={existing ? "Remove from watchlist" : "Watch — boost matching articles in the bulletin"}
+    >
+      {existing ? "★ watching" : "☆ watch"}
+    </button>
+  );
 }
 
 // ─── Article context card ─────────────────────────────────────────────────────
@@ -202,6 +237,12 @@ function CVEContent({ cveId }) {
         <Stat label="KEV"       value={rec?.in_kev ? `Due ${rec.kev_due_date || "—"}` : "Not in KEV"} className={rec?.in_kev ? "text-red-400" : "text-slate-500"} neon={neon} />
       </div>
 
+      {rec?.ai_summary && (
+        <div className="rounded-xl p-4" style={{ background: "#09101E", border: `1px solid ${neon.border}`, borderLeft: `2px solid ${neon.hex}` }}>
+          <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-600 font-mono mb-2">Plain English</div>
+          <p className="text-sm text-slate-200 leading-relaxed">{rec.ai_summary}</p>
+        </div>
+      )}
       {rec?.nvd_description && (
         <div className="rounded-xl p-4" style={{ background: "#09101E", border: `1px solid ${neon.border}` }}>
           <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-600 font-mono mb-2">NVD Description</div>
@@ -340,6 +381,9 @@ export default function EntityModal({ type, id, label, onClose }) {
             {meta.label}
           </span>
           <h2 className="text-sm font-semibold text-white font-mono truncate flex-1">{label}</h2>
+          {(type === "actor" || type === "cve") && (
+            <WatchButton itemType={type} value={label} neon={neon} />
+          )}
           <button
             onClick={onClose}
             className="text-slate-500 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-navy-700"

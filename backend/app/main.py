@@ -18,6 +18,13 @@ _auth = [Depends(require_auth)]
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    import logging
+    from app.core.config import settings as app_settings
+    if app_settings.SECRET_KEY == "change-me-in-production":
+        logging.getLogger("app").warning(
+            "SECURITY: SECRET_KEY is the default value — set a long random "
+            "SECRET_KEY in .env before exposing this app beyond localhost."
+        )
     start_scheduler(app)
     yield
     stop_scheduler()

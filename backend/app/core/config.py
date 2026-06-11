@@ -18,12 +18,23 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "qwen2.5:7b"
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # Embeddings (optional) — served by Ollama at LLM_BASE_URL regardless of
+    # LLM_PROVIDER. Empty string disables embeddings entirely.
+    # e.g. EMBEDDING_MODEL=nomic-embed-text  (ollama pull nomic-embed-text)
+    EMBEDDING_MODEL: str = ""
+
     # External APIs (all optional)
     NVD_API_KEY: Optional[str] = None
 
     # Enrichment
-    ENRICH_BATCH_SIZE: int = 5
     ENRICH_DELAY_SECONDS: float = 0.0
+
+    # Bulletin
+    BULLETIN_MAX_ITEMS: int = 30
+
+    # Optional webhook (ntfy-style: plain-text POST) — the daily brief is pushed
+    # here after the scheduled bulletin build. Empty disables.
+    BRIEF_WEBHOOK_URL: str = ""
 
     # Scheduler (UTC hours)
     INGEST_HOUR: int = 7

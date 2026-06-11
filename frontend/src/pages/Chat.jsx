@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import ReactMarkdown from "react-markdown";
 import { Button, Spinner } from "../components/ui";
 import { getToken } from "../lib/auth";
 
@@ -10,7 +11,13 @@ function Message({ role, content }) {
           ? "bg-brand-600 text-white"
           : "bg-navy-800 border border-navy-border text-slate-200"
       }`}>
-        <pre className="whitespace-pre-wrap font-sans">{content}</pre>
+        {role === "user" ? (
+          <pre className="whitespace-pre-wrap font-sans">{content}</pre>
+        ) : (
+          <div className="chat-markdown">
+            <ReactMarkdown>{content}</ReactMarkdown>
+          </div>
+        )}
       </div>
     </div>
   );

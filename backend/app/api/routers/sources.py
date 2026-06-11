@@ -16,6 +16,54 @@ def list_sources(db: Session = Depends(get_db)):
     return db.query(Source).order_by(Source.name).all()
 
 
+@router.get("/stats")
+def source_stats(db: Session = Depends(get_db)):
+    """Per-source feedback quality: how often you like vs dismiss each feed's articles."""
+    from sqlalchemy import func
+    from app.models import Article, Feedback, ReadStatus
+
+    counts = dict(
+        db.query(Article.source_id, func.count(Article.id))
+        .group_by(Article.source_id)
+        .all()
+    )
+    liked = dict(
+        db.query(Article.source_id, func.count(Feedback.id))
+        .join(Feedback, Feedback.article_id == Article.id)
+        .filter(Feedback.rating > 0)
+        .group_by(Article.source_id)
+        .all()
+    )
+    disliked = dict(
+        db.query(Article.source_id, func.count(Feedback.id))
+        .join(Feedback, Feedback.article_id == Article.id)
+        .filter(Feedback.rating < 0)
+        .group_by(Article.source_id)
+        .all()
+    )
+    dismissed = dict(
+        db.query(Article.source_id, func.count(ReadStatus.id))
+        .join(ReadStatus, ReadStatus.article_id == Article.id)
+        .filter(ReadStatus.status == "dismissed")
+        .group_by(Article.source_id)
+        .all()
+    )
+
+    out = {}
+    for source_id, total in counts.items():
+        pos = liked.get(source_id, 0)
+        neg = disliked.get(source_id, 0) + dismissed.get(source_id, 0)
+        rated = pos + neg
+        out[source_id] = {
+            "articles": total,
+            "liked": pos,
+            "disliked_or_dismissed": neg,
+            "quality": round(pos / rated, 2) if rated else None,
+            "low_value": rated >= 5 and pos / rated < 0.2,
+        }
+    return out
+
+
 @router.post("", response_model=SourceOut, status_code=201)
 def create_source(body: SourceCreate, db: Session = Depends(get_db)):
     if db.query(Source).filter(Source.url == body.url).first():

@@ -4,7 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.api.deps import get_db
-from app.models import ScoringConfig, Feedback, ReadStatus, Article, UserProfile
+from app.models import (
+    ScoringConfig, Feedback, ReadStatus, Article, UserProfile,
+    BulletinItem, WatchlistItem,
+)
 from app.schemas.scoring import ScoringConfigOut, ScoringConfigUpdate
 from app.services.scoring import _get_config, _get_profile
 from app.services.scheduler import get_scheduler
@@ -64,16 +67,18 @@ def feedback_signal_transparency(db: Session = Depends(get_db)):
     )
     explicit_ids = {r.article_id for r in fb_rows}
 
-    # Dismissed = implicit -1
-    dismissed_rows = (
+    # Implicit signals: dismissed = -1, acknowledged (opened/read) = +0.4
+    implicit_rows = (
         db.query(ReadStatus)
-        .filter(ReadStatus.status == "dismissed", ReadStatus.updated_at >= cutoff)
+        .filter(ReadStatus.status.in_(["dismissed", "acknowledged"]), ReadStatus.updated_at >= cutoff)
         .order_by(ReadStatus.updated_at.desc())
         .all()
     )
-    dismissed_rows = [d for d in dismissed_rows if d.article_id not in explicit_ids]
+    implicit_rows = [d for d in implicit_rows if d.article_id not in explicit_ids]
+    dismissed_rows = [d for d in implicit_rows if d.status == "dismissed"]
+    acked_rows = [d for d in implicit_rows if d.status == "acknowledged"]
 
-    all_article_ids = list(explicit_ids | {d.article_id for d in dismissed_rows})
+    all_article_ids = list(explicit_ids | {d.article_id for d in implicit_rows})
     articles_map = {
         a.id: a
         for a in db.query(Article).filter(Article.id.in_(all_article_ids)).all()
@@ -112,14 +117,25 @@ def feedback_signal_transparency(db: Session = Depends(get_db)):
             "rated_at": d.updated_at.isoformat() if d.updated_at else None,
             "features": _features(art),
         })
+    for d in acked_rows:
+        art = articles_map.get(d.article_id)
+        rated.append({
+            "article_id": d.article_id,
+            "title": art.title if art else "(article deleted)",
+            "rating": 0.4,
+            "source": "acknowledged",
+            "reason_tags": [],
+            "rated_at": d.updated_at.isoformat() if d.updated_at else None,
+            "features": _features(art),
+        })
 
-    total_signals = len(fb_rows) + len(dismissed_rows)
+    total_signals = len(fb_rows) + len(implicit_rows)
     active = total_signals >= config.min_feedback_articles
 
     return {
         "status": "active" if active else "inactive",
         "active_reason": (
-            f"{total_signals} signal(s) in window ({len(fb_rows)} rated, {len(dismissed_rows)} dismissed)"
+            f"{total_signals} signal(s) in window ({len(fb_rows)} rated, {len(dismissed_rows)} dismissed, {len(acked_rows)} read)"
             if active
             else f"Need {config.min_feedback_articles} signals, have {total_signals} in the last {config.feedback_lookback_days} days"
         ),
@@ -135,7 +151,7 @@ def feedback_signal_transparency(db: Session = Depends(get_db)):
             "  decay = exp(-ln(2) × age_days / decay_half_life_days)\n"
             "  effective_weight = overlap_score × decay\n"
             "  where shared_features = matching category + TTPs + actors + sectors\n"
-            "  dismissed articles count as rating = -1\n"
+            "  dismissed articles count as rating = -1; opened/acknowledged = +0.4\n"
             "weighted_mean = Σ(effective_weight × rating) / Σ(effective_weight)\n"
             "signal = (weighted_mean + 1) / 2   ← normalised to [0, 1]\n"
             "Only signals with at least one overlapping feature contribute."
@@ -232,6 +248,129 @@ def update_profile(body: UserProfileUpdate, db: Session = Depends(get_db)):
 def run_prune(db: Session = Depends(get_db)):
     from app.services.pruning import prune
     return prune(db)
+
+
+@router.get("/scoring/suggest")
+def suggest_weights(db: Session = Depends(get_db)):
+    """
+    Suggest scoring weights from your own feedback history.
+
+    Joins bulletin items (which store raw component scores) with explicit
+    ratings, then sets each weight proportional to how well that component
+    separates liked from disliked articles (difference of means). Transparent,
+    no black box — apply with PATCH /settings/scoring.
+    """
+    MIN_TOTAL, MIN_PER_CLASS = 10, 3
+
+    rows = (
+        db.query(BulletinItem, Feedback.rating)
+        .join(Feedback, Feedback.article_id == BulletinItem.article_id)
+        .filter(Feedback.rating != 0)
+        .all()
+    )
+    liked    = [item for item, r in rows if r > 0]
+    disliked = [item for item, r in rows if r < 0]
+
+    if len(rows) < MIN_TOTAL or len(liked) < MIN_PER_CLASS or len(disliked) < MIN_PER_CLASS:
+        return {
+            "available": False,
+            "reason": (
+                f"Need at least {MIN_TOTAL} rated bulletin items with {MIN_PER_CLASS}+ "
+                f"likes and {MIN_PER_CLASS}+ dislikes — have {len(liked)} liked / "
+                f"{len(disliked)} disliked."
+            ),
+        }
+
+    components = {
+        "weight_ai_severity":     "raw_ai_severity",
+        "weight_feedback_signal": "raw_feedback_signal",
+        "weight_profile_match":   "raw_profile_match",
+        "weight_kev_bonus":       "raw_kev_bonus",
+        "weight_recency":         "raw_recency_factor",
+    }
+
+    def mean(items, attr):
+        vals = [getattr(i, attr) or 0.0 for i in items]
+        return sum(vals) / len(vals) if vals else 0.0
+
+    separation = {
+        wkey: abs(mean(liked, attr) - mean(disliked, attr))
+        for wkey, attr in components.items()
+    }
+    total_sep = sum(separation.values())
+    if total_sep == 0:
+        return {"available": False, "reason": "No component separates your likes from dislikes yet."}
+
+    suggested = {k: round(v / total_sep, 2) for k, v in separation.items()}
+    # fix rounding drift so weights sum to exactly 1.0
+    drift = round(1.0 - sum(suggested.values()), 2)
+    largest = max(suggested, key=suggested.get)
+    suggested[largest] = round(suggested[largest] + drift, 2)
+
+    config = _get_config(db)
+    return {
+        "available": True,
+        "suggested": suggested,
+        "current": {k: getattr(config, k) for k in components},
+        "sample": {"liked": len(liked), "disliked": len(disliked)},
+        "method": "weight ∝ |mean(component | liked) − mean(component | disliked)| over your rated bulletin items",
+    }
+
+
+class WatchlistAdd(BaseModel):
+    item_type: str  # actor | cve | keyword
+    value: str
+
+
+@router.get("/watchlist")
+def get_watchlist(db: Session = Depends(get_db)):
+    items = db.query(WatchlistItem).order_by(WatchlistItem.created_at.desc()).all()
+    return [
+        {"id": i.id, "item_type": i.item_type, "value": i.value, "created_at": i.created_at.isoformat()}
+        for i in items
+    ]
+
+
+@router.post("/watchlist")
+def add_watchlist(body: WatchlistAdd, db: Session = Depends(get_db)):
+    if body.item_type not in ("actor", "cve", "keyword"):
+        raise HTTPException(400, "item_type must be actor, cve, or keyword")
+    value = body.value.strip()
+    if not value:
+        raise HTTPException(400, "value cannot be empty")
+    existing = (
+        db.query(WatchlistItem)
+        .filter(WatchlistItem.item_type == body.item_type, WatchlistItem.value.ilike(value))
+        .first()
+    )
+    if existing:
+        return {"id": existing.id, "already_existed": True}
+    item = WatchlistItem(item_type=body.item_type, value=value)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"id": item.id, "already_existed": False}
+
+
+@router.delete("/watchlist/{item_id}")
+def remove_watchlist(item_id: str, db: Session = Depends(get_db)):
+    item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "Watchlist item not found")
+    db.delete(item)
+    db.commit()
+    return {"deleted": True}
+
+
+@router.post("/benign-domains/refresh")
+async def refresh_benign_domains():
+    """Download the Tranco top-sites list to expand the IOC false-positive filter."""
+    from app.services.benign_domains import refresh_from_tranco
+    try:
+        count = await refresh_from_tranco()
+    except Exception as e:
+        raise HTTPException(502, f"Download failed: {e}")
+    return {"domains": count}
 
 
 @router.post("/scoring/reset", response_model=ScoringConfigOut)

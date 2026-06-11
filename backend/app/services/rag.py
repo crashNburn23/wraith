@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app.models import Article, IOC, CVERecord, ThreatActor
 from app.services.llm_client import get_llm_client, is_anthropic
+from app.services import embeddings
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,37 @@ logger = logging.getLogger(__name__)
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
 IP_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 DOMAIN_PATTERN = re.compile(r"\b[a-z0-9-]+\.[a-z]{2,}\b", re.IGNORECASE)
+
+SEMANTIC_MIN_SIM = 0.35
+
+
+async def _retrieve_articles_semantic(db: Session, query: str, limit: int = 6) -> list[dict] | None:
+    """Embedding-based retrieval. Returns None when embeddings are unavailable
+    so the caller falls back to keyword search."""
+    if not embeddings.enabled():
+        return None
+    qvec = await embeddings.embed_text(query)
+    if not qvec:
+        return None
+    rows = (
+        db.query(Article.id, Article.title, Article.url, Article.ai_summary, Article.embedding)
+        .filter(Article.enrichment_status == "enriched", Article.embedding.isnot(None))
+        .all()
+    )
+    if not rows:
+        return None
+    scored = sorted(
+        ((embeddings.cosine(qvec, r.embedding), r) for r in rows),
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    top = [(s, r) for s, r in scored[:limit] if s >= SEMANTIC_MIN_SIM]
+    if not top:
+        return None
+    return [
+        {"id": r.id, "title": r.title, "url": r.url, "summary": r.ai_summary or ""}
+        for _, r in top
+    ]
 
 
 def _retrieve_articles(db: Session, query: str, limit: int = 6) -> list[dict]:
@@ -91,7 +123,10 @@ async def stream_chat(
     # Use the last user message for retrieval
     last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
 
-    articles = _retrieve_articles(db, last_user)
+    # Semantic retrieval when embeddings are available; keyword fallback otherwise
+    articles = await _retrieve_articles_semantic(db, last_user)
+    if articles is None:
+        articles = _retrieve_articles(db, last_user)
     iocs = _retrieve_iocs(db, last_user)
     cves = _retrieve_cves(db, last_user)
     actors = _retrieve_actors(db, last_user)

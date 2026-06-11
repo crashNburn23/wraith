@@ -788,40 +788,227 @@ function ScoringSection() {
         {dirty && <span className="text-xs text-yellow-400">Unsaved changes</span>}
         {saveMut.isSuccess && !dirty && <span className="text-xs text-green-400">Saved</span>}
       </div>
+
+      <Divider />
+      <SuggestWeights onApply={(suggested) => {
+        setWeights(suggested);
+        setDirty(true);
+      }} />
     </CollapsibleCard>
+  );
+}
+
+const SUGGEST_LABELS = {
+  weight_ai_severity: "AI Severity",
+  weight_feedback_signal: "Feedback Signal",
+  weight_profile_match: "Profile Match",
+  weight_kev_bonus: "KEV Bonus",
+  weight_recency: "Recency",
+};
+
+function SuggestWeights({ onApply }) {
+  const mut = useMutation({ mutationFn: settingsApi.suggestWeights });
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-300">Suggested Weights</h3>
+          <p className="text-[11px] text-slate-600 mt-0.5">Learned from your own ratings — which components actually separate what you like from what you skip</p>
+        </div>
+        <Button size="sm" variant="secondary" onClick={() => mut.mutate()} disabled={mut.isPending}>
+          {mut.isPending ? <><Spinner size="sm" /> Analyzing…</> : "Analyze My Feedback"}
+        </Button>
+      </div>
+      {mut.isSuccess && !mut.data.available && (
+        <p className="text-[11px] text-amber-400/80 font-mono">{mut.data.reason}</p>
+      )}
+      {mut.isSuccess && mut.data.available && (
+        <div className="bg-navy-900/80 rounded-lg p-3 space-y-2">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            {Object.entries(mut.data.suggested).map(([k, v]) => {
+              const cur = mut.data.current[k];
+              const delta = v - cur;
+              return (
+                <div key={k} className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">{SUGGEST_LABELS[k] || k}</span>
+                  <span className="font-mono">
+                    <span className="text-slate-600">{(cur * 100).toFixed(0)}%</span>
+                    <span className="text-slate-600 mx-1">→</span>
+                    <span className={delta > 0.02 ? "text-emerald-400" : delta < -0.02 ? "text-red-400" : "text-slate-300"}>
+                      {(v * 100).toFixed(0)}%
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-slate-600 font-mono">
+            Based on {mut.data.sample.liked} liked / {mut.data.sample.disliked} disliked bulletin items. {mut.data.method}
+          </p>
+          <Button size="sm" onClick={() => onApply(mut.data.suggested)}>
+            Load into sliders
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
 function RebuildScoresButton() {
   const qc = useQueryClient();
   const mut = useMutation({
-    mutationFn: bulletinApi.rebuildScores,
-    onSuccess: (data) => qc.invalidateQueries({ queryKey: ["bulletin-today"] }),
+    mutationFn: (scope) => bulletinApi.rebuildScores(scope),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["bulletin-today"] }),
   });
   return (
     <div className="flex items-center gap-2">
-      <Button variant="secondary" size="sm" onClick={() => mut.mutate()} disabled={mut.isPending}>
+      <Button variant="secondary" size="sm" onClick={() => mut.mutate("today")} disabled={mut.isPending}>
         {mut.isPending ? <><Spinner size="sm" /> Rebuilding…</> : "Rebuild Today's Scores"}
       </Button>
-      {mut.isSuccess && <span className="text-xs text-green-400">{mut.data?.recomputed} items rescored</span>}
+      <Button variant="ghost" size="sm" onClick={() => mut.mutate("all")} disabled={mut.isPending} title="Recompute every historical bulletin with current weights">
+        All bulletins
+      </Button>
+      {mut.isSuccess && (
+        <span className="text-xs text-green-400">
+          {mut.data?.scope === "all" ? "All bulletins rescored" : `${mut.data?.recomputed} items rescored`}
+        </span>
+      )}
       {mut.isError && <span className="text-xs text-red-400">{mut.error?.response?.data?.detail || "No bulletin for today"}</span>}
     </div>
   );
 }
 
+// ─── Watchlist ────────────────────────────────────────────────────────────────
+
+function WatchlistSection() {
+  const qc = useQueryClient();
+  const [type, setType] = useState("actor");
+  const [value, setValue] = useState("");
+  const { data: items, isLoading } = useQuery({ queryKey: ["watchlist"], queryFn: settingsApi.getWatchlist });
+
+  const addMut = useMutation({
+    mutationFn: () => settingsApi.addWatchlist(type, value),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["watchlist"] }); setValue(""); },
+  });
+  const delMut = useMutation({
+    mutationFn: (id) => settingsApi.removeWatchlist(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlist"] }),
+  });
+
+  const TYPE_STYLE = {
+    actor:   "bg-violet-900/30 text-violet-300 border-violet-500/20",
+    cve:     "bg-orange-900/30 text-orange-300 border-orange-500/20",
+    keyword: "bg-emerald-900/30 text-emerald-300 border-emerald-500/20",
+  };
+
+  return (
+    <CollapsibleCard
+      title="Watchlist"
+      subtitle="Pinned actors, CVEs, and keywords — matching articles get a full relevance boost"
+    >
+      {isLoading ? <Spinner /> : (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {(items || []).length === 0 && (
+            <p className="text-xs text-slate-600 italic">Nothing watched yet — pin actors or CVEs here or from their detail modals.</p>
+          )}
+          {(items || []).map(i => (
+            <span key={i.id} className={`flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 rounded-md border ${TYPE_STYLE[i.item_type] || TYPE_STYLE.keyword}`}>
+              <span className="opacity-50 text-[9px] uppercase">{i.item_type}</span>
+              {i.value}
+              <button onClick={() => delMut.mutate(i.id)} className="opacity-50 hover:opacity-100 hover:text-red-400 leading-none">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <select
+          value={type}
+          onChange={e => setType(e.target.value)}
+          className="bg-navy-900 border border-navy-border rounded-lg px-2 py-1.5 text-sm text-slate-100 focus:outline-none"
+        >
+          <option value="actor">Actor</option>
+          <option value="cve">CVE</option>
+          <option value="keyword">Keyword</option>
+        </select>
+        <Input
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          placeholder={type === "cve" ? "CVE-2026-…" : type === "actor" ? "e.g. Scattered Spider" : "e.g. vmware esxi"}
+          className="flex-1"
+        />
+        <Button size="sm" onClick={() => addMut.mutate()} disabled={!value.trim() || addMut.isPending}>
+          {addMut.isPending ? "Adding…" : "Watch"}
+        </Button>
+      </div>
+    </CollapsibleCard>
+  );
+}
+
+// ─── Data Quality ─────────────────────────────────────────────────────────────
+
+function DataQualitySection() {
+  const [result, setResult] = useState(null);
+  const refreshMut = useMutation({
+    mutationFn: settingsApi.refreshBenignDomains,
+    onSuccess: (data) => setResult(data),
+  });
+
+  return (
+    <CollapsibleCard
+      title="IOC False-Positive Filter"
+      subtitle="Built-in benign-domain list, expandable with the Tranco top-sites list"
+      actions={
+        <Button size="sm" variant="secondary" onClick={() => refreshMut.mutate()} disabled={refreshMut.isPending}>
+          {refreshMut.isPending ? <><Spinner size="sm" /> Downloading…</> : "Download Tranco list"}
+        </Button>
+      }
+    >
+      <p className="text-xs text-slate-500 leading-relaxed">
+        Extracted domain/URL IOCs are rejected when they match a known-benign domain.
+        The built-in list covers security vendors, cloud infra, and news sites; downloading
+        the Tranco top-5000 catches popular sites automatically instead of relying on manual whitelisting.
+      </p>
+      {result && <p className="text-xs text-green-400 font-mono mt-2">{result.domains} domains loaded ✓</p>}
+      {refreshMut.isError && <p className="text-xs text-red-400 font-mono mt-2">{refreshMut.error?.response?.data?.detail || "Download failed"}</p>}
+    </CollapsibleCard>
+  );
+}
+
 // ─── Sources ──────────────────────────────────────────────────────────────────
 
-function SourceRow({ source, onDelete, onToggle }) {
+function SourceRow({ source, stats, onDelete, onToggle }) {
   return (
     <div className="flex items-center gap-3 py-2 border-b border-navy-border last:border-0 group">
       <button onClick={() => onToggle(source)}
         className={`w-2 h-2 rounded-full flex-shrink-0 ${source.is_active ? "bg-green-500" : "bg-gray-600"}`}
         title={source.is_active ? "Active" : "Disabled"} />
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-gray-200">{source.name}</div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-200">{source.name}</span>
+          {stats?.low_value && (
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400/80 border border-amber-500/20"
+              title="You dismiss or downvote most articles from this feed — consider disabling it">
+              low value
+            </span>
+          )}
+        </div>
         <div className="text-xs text-slate-500 truncate">{source.url}</div>
         {source.last_error && <div className="text-xs text-red-400 truncate">{source.last_error}</div>}
       </div>
+      {stats && (
+        <span
+          className="text-[10px] font-mono text-slate-600 flex-shrink-0"
+          title={`${stats.articles} articles · ${stats.liked} liked · ${stats.disliked_or_dismissed} skipped${stats.quality != null ? ` · quality ${Math.round(stats.quality * 100)}%` : ""}`}
+        >
+          {stats.articles} art
+          {stats.quality != null && (
+            <span className={stats.quality >= 0.5 ? " text-emerald-500/70" : " text-amber-500/70"}>
+              {" "}· {Math.round(stats.quality * 100)}%
+            </span>
+          )}
+        </span>
+      )}
       {source.consecutive_failures > 0 && <span className="text-xs text-red-400">{source.consecutive_failures} fails</span>}
       <button onClick={() => onDelete(source.id)} className="opacity-0 group-hover:opacity-100 text-xs text-slate-600 hover:text-red-400">✕</button>
     </div>
@@ -835,6 +1022,7 @@ function SourcesSection() {
   const [importResult, setImportResult] = useState(null);
 
   const { data: sources, isLoading } = useQuery({ queryKey: ["sources"], queryFn: sourcesApi.list });
+  const { data: sourceStats } = useQuery({ queryKey: ["source-stats"], queryFn: sourcesApi.stats, staleTime: 60_000 });
 
   const createMut = useMutation({
     mutationFn: () => sourcesApi.create({ name, url }),
@@ -892,7 +1080,7 @@ function SourcesSection() {
       {isLoading ? <Spinner /> : (
         <div className="mb-4">
           {sources?.map(s => (
-            <SourceRow key={s.id} source={s} onDelete={id => deleteMut.mutate(id)} onToggle={src => toggleMut.mutate(src)} />
+            <SourceRow key={s.id} source={s} stats={sourceStats?.[s.id]} onDelete={id => deleteMut.mutate(id)} onToggle={src => toggleMut.mutate(src)} />
           ))}
         </div>
       )}
@@ -960,10 +1148,12 @@ export default function Settings() {
       <h1 className="text-xl font-bold text-white">Settings</h1>
       <ControlsSection />
       <ProfileSection />
+      <WatchlistSection />
       <NaturalLanguageFeedbackSection />
       <ScoringSection />
       <SystemPromptSection />
       <SourcesSection />
+      <DataQualitySection />
       <StorageSection />
       <SchedulerSection />
     </div>

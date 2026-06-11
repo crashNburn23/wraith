@@ -1,10 +1,16 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Literal
 from pydantic import BaseModel
 from app.api.deps import get_db
+from app.db.session import SessionLocal
 from app.models import Article, IOC, TTPTag, ArticleActor, CVEMention, IOCWhitelist
 from app.services import job_state
+from app.services.corrections import record_correction
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/enrich", tags=["enrich"])
 
@@ -22,7 +28,7 @@ class WhitelistAdd(BaseModel):
 
 
 @router.post("/run")
-async def run_enrichment(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def run_enrichment(background_tasks: BackgroundTasks):
     run = job_state.get_run("enrich")
     if run and run.status == "running":
         raise HTTPException(409, "Enrichment already running. Stop or wait for it to finish.")
@@ -33,7 +39,14 @@ async def run_enrichment(background_tasks: BackgroundTasks, db: Session = Depend
     from app.services.enrichment_runner import run_enrich_batch
 
     async def _run():
-        await run_enrich_batch(db)
+        # Own session: the request-scoped one is closed before background tasks run
+        session = SessionLocal()
+        try:
+            await run_enrich_batch(session)
+        except Exception:
+            logger.exception("Enrichment batch failed")
+        finally:
+            session.close()
 
     background_tasks.add_task(_run)
     return {"status": "started"}
@@ -74,7 +87,7 @@ def stop_enrichment():
 
 
 @router.post("/resume")
-async def resume_enrichment(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def resume_enrichment(background_tasks: BackgroundTasks):
     job_state.set_paused("enrich", False)
     run = job_state.get_run("enrich")
     if run and run.status == "running":
@@ -83,7 +96,13 @@ async def resume_enrichment(background_tasks: BackgroundTasks, db: Session = Dep
     from app.services.enrichment_runner import run_enrich_batch
 
     async def _run():
-        await run_enrich_batch(db)
+        session = SessionLocal()
+        try:
+            await run_enrich_batch(session)
+        except Exception:
+            logger.exception("Enrichment batch failed")
+        finally:
+            session.close()
 
     background_tasks.add_task(_run)
     return {"status": "resumed"}
@@ -133,12 +152,15 @@ def get_whitelist(db: Session = Depends(get_db)):
 def add_to_whitelist(body: WhitelistAdd, db: Session = Depends(get_db)):
     existing = db.query(IOCWhitelist).filter(IOCWhitelist.value == body.value).first()
     if existing:
-        return {"id": existing.id, "already_existed": True}
+        return {"id": existing.id, "already_existed": True, "removed_iocs": 0}
     entry = IOCWhitelist(value=body.value, ioc_type=body.ioc_type, note=body.note)
     db.add(entry)
+    # Retro-clean: whitelisting also removes existing IOC rows with this value
+    removed = db.query(IOC).filter(IOC.value == body.value).delete(synchronize_session=False)
+    record_correction(db, "ioc", "whitelisted", body.value)
     db.commit()
     db.refresh(entry)
-    return {"id": entry.id, "already_existed": False}
+    return {"id": entry.id, "already_existed": False, "removed_iocs": removed}
 
 
 @router.delete("/whitelist/{item_id}")
@@ -164,7 +186,18 @@ def patch_entity(
     if not obj:
         raise HTTPException(404, f"{entity_type} not found")
 
+    def _current_value() -> str:
+        if entity_type == "ioc":
+            return obj.value
+        if entity_type == "ttp":
+            return obj.technique_id
+        if entity_type == "cve":
+            return obj.cve_id
+        return obj.actor.name if obj.actor else ""
+
     if body.delete:
+        # Record the correction so future enrichment runs learn from it
+        record_correction(db, entity_type, "deleted", _current_value())
         db.delete(obj)
         db.commit()
         return {"deleted": True}
@@ -172,6 +205,9 @@ def patch_entity(
     if body.user_note is not None:
         obj.user_note = body.user_note
     if body.value is not None:
+        original = _current_value()
+        if original and original != body.value:
+            record_correction(db, entity_type, "edited", original, body.value)
         if entity_type == "ioc":
             obj.value = body.value
         elif entity_type == "ttp":

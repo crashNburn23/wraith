@@ -14,6 +14,13 @@ function SignalBadge({ source, rating }) {
       </span>
     );
   }
+  if (source === "acknowledged") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-mono text-sky-400/80 bg-sky-900/20 border border-sky-500/20 px-1.5 py-0.5 rounded" title="Opened/read — counts as implicit +0.4">
+        ◐ read
+      </span>
+    );
+  }
   if (rating > 0) {
     return (
       <span className="inline-flex items-center text-[10px] font-bold font-mono text-emerald-400 bg-emerald-900/30 px-1.5 py-0.5 rounded">

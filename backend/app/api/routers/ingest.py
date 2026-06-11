@@ -1,14 +1,19 @@
+import logging
+
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 from app.api.deps import get_db
+from app.db.session import SessionLocal
 from app.models import Source, Article
 from app.services import job_state
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
 @router.post("/run")
-async def trigger_ingest(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def trigger_ingest(background_tasks: BackgroundTasks):
     run = job_state.get_run("ingest")
     if run and run.status == "running":
         raise HTTPException(409, "Ingest already running.")
@@ -16,7 +21,14 @@ async def trigger_ingest(background_tasks: BackgroundTasks, db: Session = Depend
     from app.services.ingest_runner import run_ingest
 
     async def _run():
-        await run_ingest(db)
+        # Own session: the request-scoped one is closed before background tasks run
+        session = SessionLocal()
+        try:
+            await run_ingest(session)
+        except Exception:
+            logger.exception("Ingest run failed")
+        finally:
+            session.close()
 
     background_tasks.add_task(_run)
     return {"status": "started"}

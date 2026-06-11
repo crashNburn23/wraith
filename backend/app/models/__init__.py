@@ -6,6 +6,7 @@ from app.models.feedback import Feedback, ReadStatus
 from app.models.scoring_config import ScoringConfig
 from app.models.user_profile import UserProfile
 from app.models.whitelist import IOCWhitelist
+from app.models.ops import JobRunRecord, JobFlag, EnrichmentCorrection, WatchlistItem
 
 __all__ = [
     "Source", "Article",
@@ -14,4 +15,5 @@ __all__ = [
     "Feedback", "ReadStatus",
     "ScoringConfig", "UserProfile",
     "IOCWhitelist",
+    "JobRunRecord", "JobFlag", "EnrichmentCorrection", "WatchlistItem",
 ]

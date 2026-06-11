@@ -33,6 +33,7 @@ def list_cves(
                 "in_kev": r.in_kev,
                 "kev_due_date": r.kev_due_date,
                 "nvd_description": r.nvd_description,
+                "ai_summary": r.ai_summary,
             }
             for r in items
         ],
@@ -48,11 +49,17 @@ def cve_stats(db: Session = Depends(get_db)):
 
 
 @router.post("/sync")
-async def trigger_cve_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def trigger_cve_sync(background_tasks: BackgroundTasks):
+    from app.db.session import SessionLocal
     from app.services.cve_enrichment import sync_cves_for_articles
 
     async def _run():
-        await sync_cves_for_articles(db)
+        # Own session: the request-scoped one is closed before background tasks run
+        session = SessionLocal()
+        try:
+            await sync_cves_for_articles(session)
+        finally:
+            session.close()
 
     background_tasks.add_task(_run)
     return {"status": "started"}
@@ -72,5 +79,6 @@ def get_cve(cve_id: str, db: Session = Depends(get_db)):
         "in_kev": record.in_kev,
         "kev_due_date": record.kev_due_date,
         "nvd_description": record.nvd_description,
+        "ai_summary": record.ai_summary,
         "article_ids": article_ids,
     }

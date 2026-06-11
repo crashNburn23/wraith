@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { search, cve as cveApi, enrich as enrichApi } from "../lib/api";
-import { Input, Select, Tabs, Spinner, Badge } from "../components/ui";
+import { Input, Select, Tabs, Spinner, Badge, SeverityBadge } from "../components/ui";
 import { formatDate, timeAgo, categoryColor, severityBg } from "../lib/utils";
 import { useEntityModal } from "../components/EntityModalContext";
 
@@ -61,9 +61,7 @@ function ArticlesTab() {
                     {a.threat_category && (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono font-medium ${categoryColor(a.threat_category)}`}>{a.threat_category}</span>
                     )}
-                    {a.ai_severity_score && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono ${severityBg(a.ai_severity_score)}`}>{a.ai_severity_score.toFixed(0)}</span>
-                    )}
+                    <SeverityBadge score={a.ai_severity_score} />
                     <span className="text-[10px] text-slate-600 font-mono">{formatDate(a.published_at)}</span>
                   </div>
                   <Link to={`/articles/${a.id}`} className="text-sm text-slate-200 hover:text-white font-medium leading-snug">{a.title}</Link>
@@ -239,7 +237,7 @@ function CVEsTab() {
               {c.epss_score && <span className="text-[11px] text-slate-400 font-mono">EPSS {(c.epss_score * 100).toFixed(1)}%</span>}
               {c.in_kev && <Badge color="red">KEV</Badge>}
               {c.kev_due_date && <span className="text-[11px] text-red-400 font-mono">due {c.kev_due_date}</span>}
-              <p className="text-xs text-slate-500 flex-1 truncate">{c.nvd_description}</p>
+              <p className="text-xs text-slate-500 flex-1 truncate" title={c.nvd_description || undefined}>{c.ai_summary || c.nvd_description}</p>
             </div>
           ))}
         </div>

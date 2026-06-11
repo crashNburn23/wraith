@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { articles as articlesApi, enrich, feedback as feedbackApi } from "../lib/api";
-import { Button, Spinner, Input, Textarea } from "../components/ui";
-import { formatDate, categoryColor, severityBg } from "../lib/utils";
+import { Button, Spinner, Input, Textarea, SeverityBadge } from "../components/ui";
+import { formatDate, categoryColor } from "../lib/utils";
 import { useEntityModal } from "../components/EntityModalContext";
 import HighlightedText, { buildHighlights } from "../components/HighlightedText";
 import FeedbackButtons from "../components/FeedbackButtons";
@@ -107,6 +107,9 @@ export default function ArticleDetail() {
   const { id } = useParams();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [rawOpen, setRawOpen] = useState(false);
+
+  useEffect(() => { setRawOpen(false); }, [id]);
 
   const { data: article, isLoading, error } = useQuery({
     queryKey: ["article", id],
@@ -123,19 +126,37 @@ export default function ArticleDetail() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["article", id] }),
   });
 
-  // Keyboard shortcuts: c=back, u=👍, d=👎, h=dismiss+back, j=next, k=prev
+  // Opening an article is an implicit positive signal — auto-acknowledge
+  // unread articles so the feedback loop learns from what you actually read.
+  useEffect(() => {
+    let cancelled = false;
+    feedbackApi.getReadStatus(id).then(({ status }) => {
+      if (!cancelled && status === "unread") {
+        feedbackApi.setReadStatus(id, "acknowledged").then(() => {
+          qc.invalidateQueries({ queryKey: ["feedback-signal"] });
+        });
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [id, qc]);
+
+  // Keyboard: c/Esc=back, u=👍, n=👎 (d alias), m=dismiss+back (h alias), j/k=next/prev
   const goBack = useCallback(() => navigate("/"), [navigate]);
 
   useEffect(() => {
     const handler = (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      const t = e.target;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "c" || e.key === "Escape") { goBack(); return; }
       if (e.key === "u") { feedbackApi.rate(id, 1).then(() => qc.invalidateQueries({ queryKey: ["article-feedback", id] })); return; }
-      if (e.key === "d") { feedbackApi.rate(id, -1).then(() => qc.invalidateQueries({ queryKey: ["article-feedback", id] })); return; }
-      if (e.key === "h") {
+      if (e.key === "n" || e.key === "d") { feedbackApi.rate(id, -1).then(() => qc.invalidateQueries({ queryKey: ["article-feedback", id] })); return; }
+      if (e.key === "m" || e.key === "h") {
         feedbackApi.setReadStatus(id, "dismissed").then(() => goBack());
         return;
       }
+      if (e.key === "y") { navigator.clipboard?.writeText(article?.url || window.location.href); return; }
+      if (e.key === "e") { setRawOpen(v => !v); return; }
       if (e.key === "j" || e.key === "k") {
         try {
           const navIds = JSON.parse(sessionStorage.getItem("bulletin-nav") || "[]");
@@ -148,7 +169,7 @@ export default function ArticleDetail() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [id, goBack, navigate, qc]);
+  }, [id, goBack, navigate, qc, article]);
 
   if (isLoading) return <div className="flex justify-center mt-20"><Spinner size="lg" /></div>;
   if (error || !article) return <div className="p-8 text-red-400 font-mono">Article not found.</div>;
@@ -177,14 +198,7 @@ export default function ArticleDetail() {
             {article.threat_category}
           </span>
         )}
-        {article.ai_severity_score != null && (
-          <span
-            className={`text-[10px] px-2 py-1 rounded-md font-mono ${severityBg(article.ai_severity_score)}`}
-            title="AI-assigned severity score (0–100)"
-          >
-            severity {article.ai_severity_score.toFixed(0)}/100
-          </span>
-        )}
+        <SeverityBadge score={article.ai_severity_score} prefix="severity" title="AI-assigned severity score (0–100)" />
         <span className="text-[11px] text-slate-500 font-mono">{formatDate(article.published_at)}</span>
         <a href={article.url} target="_blank" rel="noopener noreferrer"
           className="text-[11px] font-mono ml-auto hover:underline underline-offset-2"
@@ -240,15 +254,19 @@ export default function ArticleDetail() {
 
       {/* Keyboard hint */}
       <p className="mb-5 text-[10px] font-mono text-slate-700">
-        c close · j/k next/prev · u/d rate · h dismiss
+        c close · j/k next/prev · u/n rate · m dismiss · e expand text · y copy url · ? help
       </p>
 
-      {/* Scraped text — gated behind disclosure */}
+      {/* Scraped text — gated behind disclosure, [e] toggles */}
       {article.scraped_text && (
-        <details className="group">
+        <details
+          className="group"
+          open={rawOpen}
+          onToggle={(e) => setRawOpen(e.currentTarget.open)}
+        >
           <summary className="text-[11px] text-slate-600 hover:text-slate-400 font-mono cursor-pointer select-none list-none flex items-center gap-1.5 mb-2">
             <span className="transition-transform group-open:rotate-90 inline-block">▶</span>
-            Show raw source text
+            {rawOpen ? "Hide full article text [e]" : "Show full article text [e]"}
           </summary>
           <div className="p-4 rounded-xl mt-2" style={neonCard(NEON.brand)}>
             <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 font-mono mb-3">Raw Source Text</div>

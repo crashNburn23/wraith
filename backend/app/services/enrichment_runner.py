@@ -1,15 +1,14 @@
 import asyncio
+import ipaddress
 import logging
-import re
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.models import Article, IOC, TTPTag, ThreatActor, ArticleActor, CVEMention, IOCWhitelist
 from app.services.enrichment_prompt import enrich_article
-from app.services import job_state
+from app.services.benign_domains import is_benign_domain
+from app.services.corrections import corrections_prompt_block
+from app.services import job_state, embeddings
 from app.core.config import settings
-
-# Module-level whitelist cache — loaded at the start of each batch run
-_whitelist: set[str] = set()
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 _VALID_IOC_TYPES = {"ip", "domain", "hash", "url", "email"}
 
-_IPV4_RE  = re.compile(r"^\d{1,3}(?:[.\[\]]\d{1,3}){3}$")
-_IPV6_RE  = re.compile(r"^[0-9a-fA-F:]{7,39}$")
+import re
+
 _DOMAIN_RE = re.compile(r"^[a-zA-Z0-9\[\]]([a-zA-Z0-9\-\[\]]{0,61}[a-zA-Z0-9\[\]])?(\.[a-zA-Z0-9\[\]\-]+)+$")
 _MD5_RE   = re.compile(r"^[0-9a-fA-F]{32}$")
 _SHA1_RE  = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -26,41 +25,15 @@ _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _URL_RE   = re.compile(r"^https?://", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
 
-# Well-known legitimate domains that should never be treated as malicious IOCs
-_BENIGN_DOMAINS = {
-    # Security vendors / research
-    "github.com", "virustotal.com", "shodan.io", "any.run", "hybrid-analysis.com",
-    "urlscan.io", "abuse.ch", "app.any.run", "tria.ge", "bazaar.abuse.ch",
-    "malwarebazaar.abuse.ch", "threatfox.abuse.ch", "feodotracker.abuse.ch",
-    "proofpoint.com", "safebreach.com", "crowdstrike.com", "mandiant.com",
-    "recordedfuture.com", "team-cymru.com", "shadowserver.org",
-    "talosintelligence.com", "talos.com", "unit42.paloaltonetworks.com",
-    "paloaltonetworks.com", "checkpoint.com", "sentinelone.com",
-    "secureworks.com", "fireeye.com", "huntress.com",
-    # Cloud/infra
-    "amazonaws.com", "azure.com", "cloudflare.com", "fastly.com",
-    "akamai.com", "digitalocean.com", "linode.com",
-    # Microsoft / Apple / Google / Amazon
-    "microsoft.com", "windows.com", "office.com", "live.com",
-    "google.com", "googleapis.com", "gstatic.com", "youtube.com",
-    "apple.com", "icloud.com", "amazon.com", "aws.amazon.com",
-    # Government / standards
-    "cisa.gov", "nist.gov", "nvd.nist.gov", "us-cert.gov", "cve.org",
-    "mitre.org", "attack.mitre.org",
-    # News / reference
-    "exploit-db.com", "bleepingcomputer.com", "theregister.com",
-    "techcrunch.com", "wired.com", "darkreading.com", "securityweek.com",
-    "bbc.co.uk", "reuters.com", "krebsonsecurity.com", "arstechnica.com",
-    # Test/generic
-    "example.com", "test.com", "localhost",
-}
 
-
-def _is_benign_domain(hostname: str) -> bool:
-    h = hostname.lower().replace("[", "").replace("]", "")
-    return h in _BENIGN_DOMAINS or any(
-        h == d or h.endswith("." + d) for d in _BENIGN_DOMAINS
-    )
+def _is_valid_ip(value: str) -> bool:
+    """Validates IPv4/IPv6 including defanged forms like 1.2.3[.]4."""
+    clean = value.replace("[", "").replace("]", "")
+    try:
+        ipaddress.ip_address(clean)
+        return True
+    except ValueError:
+        return False
 
 
 def _validate_ioc(ioc_type: str, value: str) -> bool:
@@ -73,9 +46,9 @@ def _validate_ioc(ioc_type: str, value: str) -> bool:
     if " " in v and ioc_type != "url":
         return False
     if ioc_type == "ip":
-        return bool(_IPV4_RE.match(v) or _IPV6_RE.match(v))
+        return _is_valid_ip(v)
     if ioc_type == "domain":
-        if _is_benign_domain(v):
+        if is_benign_domain(v):
             return False
         return bool(_DOMAIN_RE.match(v))
     if ioc_type == "hash":
@@ -87,7 +60,7 @@ def _validate_ioc(ioc_type: str, value: str) -> bool:
         # reject URLs that are just references to benign sites
         try:
             host = clean.split("/")[2].split(":")[0]
-            if _is_benign_domain(host):
+            if is_benign_domain(host):
                 return False
         except IndexError:
             return False
@@ -97,33 +70,54 @@ def _validate_ioc(ioc_type: str, value: str) -> bool:
     return False
 
 
-def _get_or_create_actor(db: Session, name: str) -> ThreatActor:
+def _load_whitelist(db: Session) -> set[str]:
+    return {row.value for row in db.query(IOCWhitelist).all()}
+
+
+def _load_actor_cache(db: Session) -> dict[str, ThreatActor]:
+    """name/alias (lowercase) → actor, built once per run to avoid per-name table scans."""
+    cache: dict[str, ThreatActor] = {}
+    for a in db.query(ThreatActor).all():
+        cache[a.name.lower()] = a
+        for alias in (a.aliases or []):
+            cache.setdefault(alias.lower(), a)
+    return cache
+
+
+def _get_or_create_actor(db: Session, name: str, cache: dict[str, ThreatActor]) -> ThreatActor:
     name = name.strip()
-    name_lower = name.lower()
-    # Exact name match
-    actor = db.query(ThreatActor).filter(ThreatActor.name == name).first()
+    actor = cache.get(name.lower())
     if actor:
         return actor
-    # Case-insensitive name match or alias match
-    for a in db.query(ThreatActor).all():
-        if a.name.lower() == name_lower:
-            return a
-        if a.aliases and any(alias.lower() == name_lower for alias in a.aliases):
-            return a
     actor = ThreatActor(name=name)
     db.add(actor)
     db.flush()
+    cache[name.lower()] = actor
     return actor
 
 
-async def enrich_one(db: Session, article: Article) -> bool:
+async def enrich_one(
+    db: Session,
+    article: Article,
+    whitelist: set[str] | None = None,
+    actor_cache: dict[str, ThreatActor] | None = None,
+    corrections_block: str | None = None,
+) -> bool:
     if not article.scraped_text:
         article.enrichment_status = "no_text"
         db.commit()
         return False
 
+    # Single-article path: load context fresh so whitelist/corrections apply
+    if whitelist is None:
+        whitelist = _load_whitelist(db)
+    if actor_cache is None:
+        actor_cache = _load_actor_cache(db)
+    if corrections_block is None:
+        corrections_block = corrections_prompt_block(db)
+
     try:
-        result = await enrich_article(article.title, article.scraped_text)
+        result = await enrich_article(article.title, article.scraped_text, corrections_block)
     except Exception as e:
         logger.error("Enrichment failed for article %s: %s", article.id, e)
         article.enrichment_status = "error"
@@ -139,11 +133,16 @@ async def enrich_one(db: Session, article: Article) -> bool:
     article.enrichment_status = "enriched"
     article.enriched_at = datetime.now(timezone.utc)
 
+    # Semantic embedding (optional, graceful no-op when disabled)
+    vec = await embeddings.embed_text(f"{article.title}\n{result.summary}")
+    if vec:
+        article.embedding = vec
+
     db.query(IOC).filter(IOC.article_id == article.id).delete()
     for ioc in result.iocs:
         if ioc.ioc_confidence == "low":
             continue
-        if ioc.value in _whitelist:
+        if ioc.value in whitelist:
             logger.debug("Skipped whitelisted IOC [%s] %r", ioc.ioc_type, ioc.value[:60])
             continue
         if not _validate_ioc(ioc.ioc_type, ioc.value):
@@ -162,7 +161,7 @@ async def enrich_one(db: Session, article: Article) -> bool:
 
     db.query(ArticleActor).filter(ArticleActor.article_id == article.id).delete()
     for name in result.threat_actors:
-        actor = _get_or_create_actor(db, name)
+        actor = _get_or_create_actor(db, name, actor_cache)
         db.add(ArticleActor(article_id=article.id, actor_id=actor.id))
 
     db.query(CVEMention).filter(CVEMention.article_id == article.id).delete()
@@ -174,8 +173,12 @@ async def enrich_one(db: Session, article: Article) -> bool:
 
 
 async def run_enrich_batch(db: Session) -> dict:
-    global _whitelist
-    _whitelist = {row.value for row in db.query(IOCWhitelist).all()}
+    # Per-run context, loaded once: whitelist, actor cache, correction memory.
+    # Pause/stop flags are NOT cleared here — the run/resume endpoints own them,
+    # so a scheduled run cannot silently override a user's manual pause.
+    whitelist = _load_whitelist(db)
+    actor_cache = _load_actor_cache(db)
+    corrections_block = corrections_prompt_block(db)
 
     pending = (
         db.query(Article)
@@ -184,9 +187,6 @@ async def run_enrich_batch(db: Session) -> dict:
     )
 
     run = job_state.start_run("enrich", total=len(pending))
-    # Clear control flags when a fresh run starts
-    job_state.set_paused("enrich", False)
-    job_state.set_stopped("enrich", False)
 
     for article in pending:
         if job_state.is_stopped("enrich"):
@@ -203,7 +203,7 @@ async def run_enrich_batch(db: Session) -> dict:
         run.current_title = article.title[:80]
 
         try:
-            ok = await enrich_one(db, article)
+            ok = await enrich_one(db, article, whitelist, actor_cache, corrections_block)
         except Exception as e:
             ok = False
             run.errors.append(job_state.ArticleError(
@@ -223,6 +223,8 @@ async def run_enrich_batch(db: Session) -> dict:
                     title=article.title[:80],
                     error=article.enrichment_status,
                 ))
+
+        job_state.save_run(run)
 
         if settings.ENRICH_DELAY_SECONDS > 0:
             await asyncio.sleep(settings.ENRICH_DELAY_SECONDS)
