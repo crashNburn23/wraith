@@ -25,6 +25,9 @@ No cloud required. Runs entirely on localhost against a local Ollama model.
 - **RAG Chat** — ask questions against your intel database; semantic retrieval when embeddings are enabled, with markdown rendering.
 - **Command palette & keyboard-first UI** — `Ctrl+K` palette, `g`-chords for page navigation, full one-handed bulletin triage (`?` shows the cheat sheet).
 - **Score breakdown** — click any score bubble to see exactly how it was computed, including which past ratings drove it.
+- **Investigations** — create named workspaces, add articles, and attach freeform notes to track an active incident or research thread. Open with `g n` or the sidebar icon.
+- **Saved Searches** — save Intel Hub filter combinations for quick reuse; optionally enable alerts that fire when new articles exceed a severity threshold.
+- **Export** — download enriched articles from a bulletin or investigation as STIX 2.1, MISP JSON, generic JSON, or CSV.
 
 ---
 
@@ -137,7 +140,7 @@ Press `?` anywhere for the full cheat sheet. The bulletin is designed for **one-
 | `y` | copy source URL |
 | `t` | triage mode |
 | `e` | raw text popout with highlighted enrichments (article page) |
-| `g` then `b`/`i`/`c`/`f`/`s` | go to Bulletin / Intel / Chat / Feedback / Settings |
+| `g` then `b`/`i`/`n`/`c`/`f`/`s` | go to Bulletin / Intel / Investigations / Chat / Feedback / Settings |
 | `Ctrl+K` | command palette |
 
 ---
