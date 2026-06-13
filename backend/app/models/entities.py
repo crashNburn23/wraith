@@ -10,6 +10,7 @@ class IOC(Base, TimestampMixin):
     article_id: Mapped[str] = mapped_column(String(36), ForeignKey("articles.id"), nullable=False)
     ioc_type: Mapped[str] = mapped_column(String(50), nullable=False)  # ip, domain, hash, url, email
     value: Mapped[str] = mapped_column(Text, nullable=False)
+    source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     article = relationship("Article", back_populates="iocs")
@@ -23,6 +24,7 @@ class TTPTag(Base, TimestampMixin):
     technique_id: Mapped[str] = mapped_column(String(20), nullable=False)  # T1566
     technique_name: Mapped[str] = mapped_column(String(255), nullable=False)
     tactic: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     article = relationship("Article", back_populates="ttp_tags")
@@ -44,6 +46,7 @@ class ArticleActor(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     article_id: Mapped[str] = mapped_column(String(36), ForeignKey("articles.id"), nullable=False)
     actor_id: Mapped[str] = mapped_column(String(36), ForeignKey("threat_actors.id"), nullable=False)
+    source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     article = relationship("Article", back_populates="article_actors")
@@ -60,6 +63,7 @@ class CVEMention(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     article_id: Mapped[str] = mapped_column(String(36), ForeignKey("articles.id"), nullable=False)
     cve_id: Mapped[str] = mapped_column(String(20), nullable=False)  # CVE-2024-1234
+    source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     article = relationship("Article", back_populates="cve_mentions")

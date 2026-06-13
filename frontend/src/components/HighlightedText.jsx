@@ -61,7 +61,7 @@ export function renderWithRanges(text, ranges) {
 }
 
 // Build highlight descriptors from article entity lists + a primary value
-export function buildHighlights(entities, primaryValue, primaryStyle = "primary") {
+export function buildHighlights(entities, primaryValue, _primaryStyle = "primary") {
   const hl = [];
 
   if (primaryValue) {

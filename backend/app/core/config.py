@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     ENRICH_HOUR: int = 8
     CVE_SYNC_HOUR: int = 9
     BULLETIN_HOUR: int = 10
+    SCHEDULER_ENABLED: bool = True
 
     # Auth
     SECRET_KEY: str = "change-me-in-production-wraith-01"

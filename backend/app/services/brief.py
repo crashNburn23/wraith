@@ -3,11 +3,13 @@ from datetime import datetime, timezone, date, timedelta
 from sqlalchemy.orm import Session
 from app.models import Bulletin, BulletinItem, Article
 from app.services.llm_client import get_llm_client, is_anthropic
+from app.services.prompt_safety import UNTRUSTED_CONTENT_RULE, untrusted_block
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-BRIEF_SYSTEM_PROMPT = """You are a senior CTI analyst writing a daily intelligence brief for a security team.
+BRIEF_SYSTEM_PROMPT = f"""You are a senior CTI analyst writing a daily intelligence brief for a security team.
+{UNTRUSTED_CONTENT_RULE}
 
 Write a 3-paragraph daily brief covering the top threats provided below.
 
@@ -52,7 +54,7 @@ def _build_article_block(rank: int, article: Article) -> str:
     if article.scraped_text:
         lines.append(f"Article text (excerpt): {article.scraped_text[:2000]}")
 
-    return "\n".join(lines)
+    return untrusted_block(f"article_{rank}", "\n".join(lines))
 
 
 async def generate_brief(db: Session, for_date: date | None = None) -> str | None:

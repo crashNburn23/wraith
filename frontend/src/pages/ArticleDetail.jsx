@@ -7,6 +7,7 @@ import { formatDate, categoryColor } from "../lib/utils";
 import { useEntityModal } from "../components/EntityModalContext";
 import FeedbackButtons from "../components/FeedbackButtons";
 import RawTextModal from "../components/RawTextModal";
+import { AddToInvestigationModal } from "../components/AddToInvestigation";
 
 // Muted accent palette for entity sections
 const NEON = {
@@ -24,29 +25,47 @@ function neonCard(n) {
   };
 }
 
-function EditableRow({ value, onSave, onDelete, placeholder, onClickEntity }) {
+function EditableRow({ value, editValue, canEditValue = true, onSave, onDelete, placeholder, onClickEntity, sourceExcerpt }) {
   const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(value || "");
+  const [val, setVal] = useState(editValue || value || "");
   const [note, setNote] = useState("");
+  const [showExcerpt, setShowExcerpt] = useState(false);
 
   if (!editing) {
     return (
-      <div className="flex items-start gap-2 py-1.5 group">
-        <span
-          onClick={onClickEntity}
-          className={`flex-1 text-sm text-slate-300 font-mono break-all ${onClickEntity ? "cursor-pointer hover:text-brand-300 hover:underline underline-offset-2" : ""}`}
-        >
-          {value}
-        </span>
-        <button onClick={() => setEditing(true)} className="opacity-0 group-hover:opacity-100 text-xs text-slate-600 hover:text-slate-300">✏</button>
-        <button onClick={onDelete}              className="opacity-0 group-hover:opacity-100 text-xs text-slate-600 hover:text-red-400">✕</button>
+      <div className="py-1.5 group">
+        <div className="flex items-start gap-2">
+          <span
+            onClick={onClickEntity}
+            className={`flex-1 text-sm text-slate-300 font-mono break-all ${onClickEntity ? "cursor-pointer hover:text-brand-300 hover:underline underline-offset-2" : ""}`}
+          >
+            {value}
+          </span>
+          {sourceExcerpt && (
+            <button
+              onClick={() => setShowExcerpt(v => !v)}
+              className="flex-shrink-0 text-[9px] font-mono text-slate-600 hover:text-slate-400 transition-colors mt-0.5"
+              title="Show source excerpt"
+              aria-label={showExcerpt ? "Hide source excerpt" : "Show source excerpt"}
+            >
+              {showExcerpt ? "▲" : "❝"}
+            </button>
+          )}
+          <button onClick={() => setEditing(true)} className="opacity-0 group-hover:opacity-100 text-xs text-slate-600 hover:text-slate-300" aria-label="Edit">✏</button>
+          <button onClick={onDelete}              className="opacity-0 group-hover:opacity-100 text-xs text-slate-600 hover:text-red-400" aria-label="Delete">✕</button>
+        </div>
+        {showExcerpt && sourceExcerpt && (
+          <p className="mt-1 text-[10px] text-slate-500 font-mono italic leading-relaxed pl-2 border-l border-slate-700">
+            &ldquo;{sourceExcerpt}&rdquo;
+          </p>
+        )}
       </div>
     );
   }
 
   return (
     <div className="bg-navy-900 rounded-lg p-2 space-y-2 my-1">
-      <Input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} className="w-full" />
+      {canEditValue && <Input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} className="w-full" />}
       <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Note (optional)" rows={1} />
       <div className="flex gap-2">
         <Button size="sm" onClick={() => { onSave(val, note); setEditing(false); }}>Save</Button>
@@ -91,9 +110,18 @@ function EntitySection({ title, items, entityType, articleId }) {
             <EditableRow
               key={item.id}
               value={label}
+              editValue={displayValue}
+              canEditValue={entityType !== "actor"}
               placeholder="Edit value"
               onClickEntity={clickHandler}
-              onSave={(v, note) => patch.mutate({ id: item.id, body: { value: v, user_note: note || null } })}
+              sourceExcerpt={item.source_excerpt}
+              onSave={(v, note) => patch.mutate({
+                id: item.id,
+                body: {
+                  ...(entityType === "actor" ? {} : { value: v }),
+                  user_note: note || null,
+                },
+              })}
               onDelete={() => patch.mutate({ id: item.id, body: { delete: true } })}
             />
           );
@@ -108,6 +136,7 @@ export default function ArticleDetail() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [rawOpen, setRawOpen] = useState(false);
+  const [addInvOpen, setAddInvOpen] = useState(false);
 
   useEffect(() => { setRawOpen(false); }, [id]);
 
@@ -164,7 +193,7 @@ export default function ArticleDetail() {
           if (idx === -1) return;
           const nextIdx = e.key === "j" ? idx + 1 : idx - 1;
           if (nextIdx >= 0 && nextIdx < navIds.length) navigate(`/articles/${navIds[nextIdx]}`);
-        } catch {}
+        } catch (_e) { /* nav ids not available — ignore */ }
       }
     };
     window.addEventListener("keydown", handler);
@@ -176,11 +205,25 @@ export default function ArticleDetail() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
+      {addInvOpen && (
+        <AddToInvestigationModal
+          articleId={id}
+          articleTitle={article.title}
+          onClose={() => setAddInvOpen(false)}
+        />
+      )}
       {/* Back */}
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between">
         <Link to="/" className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white font-mono tracking-wide transition-colors">
           ← Bulletin
         </Link>
+        <button
+          onClick={() => setAddInvOpen(true)}
+          className="text-[11px] text-slate-600 hover:text-brand-400 font-mono transition-colors"
+          title="Add to investigation"
+        >
+          + investigation
+        </button>
       </div>
 
       {/* Meta badges */}

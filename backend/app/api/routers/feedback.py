@@ -11,6 +11,7 @@ from app.models import Article, Feedback, ReadStatus, UserProfile
 from app.db.base import new_uuid
 from app.services.scoring import _get_config, _get_profile
 from app.services.llm_client import get_llm_client, is_anthropic
+from app.services.prompt_safety import UNTRUSTED_CONTENT_RULE, untrusted_block
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,7 @@ async def apply_note(body: NoteApply, db: Session = Depends(get_db)):
         raise HTTPException(400, "Text cannot be empty")
 
     prompt = f"""Extract topic preferences from this CTI analyst's feedback.
+{UNTRUSTED_CONTENT_RULE}
 Return ONLY a valid JSON object with exactly these four keys (values must be lists of lowercase strings):
 - "sectors": industry sectors of interest (e.g. "healthcare", "financial services", "critical infrastructure")
 - "categories": threat categories of interest (e.g. "ransomware", "phishing", "supply chain attack")
@@ -214,7 +216,7 @@ Return ONLY a valid JSON object with exactly these four keys (values must be lis
 Use lowercase. Return empty lists for keys with nothing applicable.
 Return ONLY the JSON object — no explanation, no markdown, no code fences.
 
-Analyst feedback: "{body.text.strip()}"
+{untrusted_block("analyst_feedback", body.text.strip(), 4000)}
 """
 
     raw = await _llm_complete(prompt, max_tokens=400)

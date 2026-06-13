@@ -5,14 +5,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.deps import require_auth
 from app.api.routers import (
-    articles, bulletin, chat, cve, enrich, entities,
-    feedback, health, ingest, search, settings, sources,
+    articles, bulletin, chat, cve, enrich, entities, export,
+    feedback, health, ingest, investigations, search, searches, settings, sources,
 )
 from app.api.routers import auth
 from app.core.logging import setup_logging
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 _auth = [Depends(require_auth)]
+_DEFAULT_SECRETS = {
+    "change-me-in-production",
+    "change-me-in-production-wraith-01",
+    "change-me-use-a-long-random-string",
+}
 
 
 @asynccontextmanager
@@ -20,14 +25,19 @@ async def lifespan(app: FastAPI):
     setup_logging()
     import logging
     from app.core.config import settings as app_settings
-    if app_settings.SECRET_KEY == "change-me-in-production":
+    if (
+        app_settings.SECRET_KEY in _DEFAULT_SECRETS
+        or (app_settings.AUTH_USERNAME == "admin" and app_settings.AUTH_PASSWORD == "wraith")
+    ):
         logging.getLogger("app").warning(
-            "SECURITY: SECRET_KEY is the default value — set a long random "
-            "SECRET_KEY in .env before exposing this app beyond localhost."
+            "SECURITY: default credentials or SECRET_KEY detected — change them "
+            "in .env before exposing this app beyond localhost."
         )
-    start_scheduler(app)
+    if app_settings.SCHEDULER_ENABLED:
+        start_scheduler(app)
     yield
-    stop_scheduler()
+    if app_settings.SCHEDULER_ENABLED:
+        stop_scheduler()
 
 
 app = FastAPI(
@@ -60,3 +70,6 @@ app.include_router(search.router,   prefix="/api", dependencies=_auth)
 app.include_router(chat.router,     prefix="/api", dependencies=_auth)
 app.include_router(settings.router, prefix="/api", dependencies=_auth)
 app.include_router(entities.router, prefix="/api", dependencies=_auth)
+app.include_router(searches.router,       prefix="/api", dependencies=_auth)
+app.include_router(investigations.router, prefix="/api", dependencies=_auth)
+app.include_router(export.router,         prefix="/api", dependencies=_auth)

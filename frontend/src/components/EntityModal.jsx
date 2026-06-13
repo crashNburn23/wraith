@@ -1,10 +1,38 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { entities as entitiesApi, settings as settingsApi } from "../lib/api";
 import { Spinner } from "./ui";
 import HighlightedText, { buildHighlights } from "./HighlightedText";
 import { formatDate } from "../lib/utils";
+
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+function useFocusTrap(ref) {
+  useEffect(() => {
+    const prev = document.activeElement;
+    // Focus the first focusable element inside the modal
+    const first = ref.current?.querySelectorAll(FOCUSABLE)?.[0];
+    first?.focus();
+
+    const trap = (e) => {
+      if (e.key !== "Tab") return;
+      const els = [...(ref.current?.querySelectorAll(FOCUSABLE) || [])];
+      if (!els.length) return;
+      const idx = els.indexOf(document.activeElement);
+      if (e.shiftKey) {
+        if (idx <= 0) { e.preventDefault(); els[els.length - 1].focus(); }
+      } else {
+        if (idx === els.length - 1) { e.preventDefault(); els[0].focus(); }
+      }
+    };
+    document.addEventListener("keydown", trap);
+    return () => {
+      document.removeEventListener("keydown", trap);
+      prev?.focus();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+}
 
 // ─── Per-entity-type muted accent palette ─────────────────────────────────────
 
@@ -154,10 +182,10 @@ function ArticleCtxCard({ article, primaryValue, defaultOpen = false, neon }) {
 function EntityChips({ entities, primaryValue, neon }) {
   if (!entities) return null;
   const all = [
-    ...((entities.iocs || []).map(i => ({ label: i.value, sub: i.ioc_type, color: "blue" }))),
-    ...((entities.cve_mentions || []).map(c => ({ label: c.cve_id, sub: "CVE", color: "orange" }))),
-    ...((entities.actors || []).map(a => ({ label: a.name, sub: "actor", color: "purple" }))),
-    ...((entities.ttps || []).map(t => ({ label: t.technique_id, sub: t.tactic || "TTP", color: "green" }))),
+    ...((entities.iocs || []).map(i => ({ label: i.value, sub: i.ioc_type, color: "blue", excerpt: i.source_excerpt }))),
+    ...((entities.cve_mentions || []).map(c => ({ label: c.cve_id, sub: "CVE", color: "orange", excerpt: c.source_excerpt }))),
+    ...((entities.actors || []).map(a => ({ label: a.name, sub: "actor", color: "purple", excerpt: a.source_excerpt }))),
+    ...((entities.ttps || []).map(t => ({ label: t.technique_id, sub: t.tactic || "TTP", color: "green", excerpt: t.source_excerpt }))),
   ];
   if (all.length === 0) return null;
 
@@ -173,11 +201,13 @@ function EntityChips({ entities, primaryValue, neon }) {
       {all.map((e, i) => (
         <span
           key={i}
+          title={e.excerpt || undefined}
           className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border ${COLOR[e.color] || COLOR.blue} ${e.label === primaryValue ? "ring-1 ring-offset-0" : ""}`}
           style={e.label === primaryValue && neon ? { ringColor: neon.hex } : undefined}
         >
           <span className="text-[9px] opacity-60">{e.sub}</span>
           {e.label}
+          {e.excerpt && <span className="text-[9px] opacity-40 ml-0.5">❝</span>}
         </span>
       ))}
     </div>
@@ -341,6 +371,9 @@ function ActorContent({ actorId }) {
 // ─── Modal shell ──────────────────────────────────────────────────────────────
 
 export default function EntityModal({ type, id, label, onClose }) {
+  const modalRef = useRef(null);
+  useFocusTrap(modalRef);
+
   useEffect(() => {
     const h = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", h);
@@ -349,6 +382,7 @@ export default function EntityModal({ type, id, label, onClose }) {
 
   const neon = TYPE_NEON[type] || TYPE_NEON.ioc;
   const meta = TYPE_META[type] || { label: type };
+  const titleId = "entity-modal-title";
 
   return (
     <div
@@ -358,6 +392,10 @@ export default function EntityModal({ type, id, label, onClose }) {
       <div className="absolute inset-0 bg-navy-950/80 backdrop-blur-sm" />
 
       <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="relative w-full max-w-2xl max-h-[88vh] flex flex-col bg-navy-800 rounded-2xl overflow-hidden"
         style={{
           border: `1px solid ${neon.border}`,
@@ -365,7 +403,7 @@ export default function EntityModal({ type, id, label, onClose }) {
         }}
       >
         {/* Neon top accent line */}
-        <div style={{ height: 2, background: `linear-gradient(90deg, ${neon.hex} 0%, ${neon.glow} 60%, transparent 100%)`, flexShrink: 0 }} />
+        <div style={{ height: 2, background: `linear-gradient(90deg, ${neon.hex} 0%, ${neon.border} 60%, transparent 100%)`, flexShrink: 0 }} />
 
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-navy-border flex-shrink-0">
@@ -375,18 +413,19 @@ export default function EntityModal({ type, id, label, onClose }) {
               color: neon.hex,
               background: neon.dim,
               border: `1px solid ${neon.border}`,
-              textShadow: `0 0 8px ${neon.glow}`,
             }}
           >
             {meta.label}
           </span>
-          <h2 className="text-sm font-semibold text-white font-mono truncate flex-1">{label}</h2>
+          <h2 id={titleId} className="text-sm font-semibold text-white font-mono truncate flex-1">{label}</h2>
           {(type === "actor" || type === "cve") && (
             <WatchButton itemType={type} value={label} neon={neon} />
           )}
           <button
             onClick={onClose}
-            className="text-slate-500 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-navy-700"
+            aria-label="Close"
+            className="text-slate-500 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-navy-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1"
+            style={{ "--tw-outline-color": neon.hex }}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />

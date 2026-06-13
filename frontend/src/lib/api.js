@@ -131,3 +131,50 @@ export const entities = {
   ioc:   (iocId)   => api.get(`/entities/ioc/${iocId}`).then(r => r.data),
   actor: (actorId) => api.get(`/entities/actor/${actorId}`).then(r => r.data),
 };
+
+export const searches = {
+  list:   ()         => api.get("/searches").then(r => r.data),
+  create: (body)     => api.post("/searches", body).then(r => r.data),
+  update: (id, body) => api.patch(`/searches/${id}`, body).then(r => r.data),
+  delete: (id)       => api.delete(`/searches/${id}`),
+  run:    (id)       => api.post(`/searches/${id}/run`).then(r => r.data),
+};
+
+export const investigations = {
+  list:          ()              => api.get("/investigations").then(r => r.data),
+  create:        (body)          => api.post("/investigations", body).then(r => r.data),
+  get:           (id)            => api.get(`/investigations/${id}`).then(r => r.data),
+  update:        (id, body)      => api.patch(`/investigations/${id}`, body).then(r => r.data),
+  delete:        (id)            => api.delete(`/investigations/${id}`),
+  addArticle:    (id, body)      => api.post(`/investigations/${id}/articles`, body).then(r => r.data),
+  updateArticle: (id, iaId, body) => api.patch(`/investigations/${id}/articles/${iaId}`, body).then(r => r.data),
+  removeArticle: (id, iaId)      => api.delete(`/investigations/${id}/articles/${iaId}`),
+  addNote:       (id, content)   => api.post(`/investigations/${id}/notes`, { content }).then(r => r.data),
+  deleteNote:    (id, noteId)    => api.delete(`/investigations/${id}/notes/${noteId}`),
+  exportJson:    (id)            => api.get(`/investigations/${id}/export`).then(r => r.data),
+};
+
+async function _download(url, params, filename) {
+  const token = getToken();
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  const res = await fetch(url + qs, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error("Download failed");
+  const blob = await res.blob();
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(href);
+}
+
+export const exports = {
+  stixBulletin:      (date)   => _download(`/api/export/stix/bulletin/${date}`, null, `wraith-stix-${date}.json`),
+  stixArticles:      (params) => _download("/api/export/stix/articles", params, "wraith-stix-articles.json"),
+  stixInvestigation: (id, name) => _download(`/api/export/stix/investigation/${id}`, null, `wraith-stix-${name || id}.json`),
+  mispBulletin:      (date)   => _download(`/api/export/misp/bulletin/${date}`, null, `wraith-misp-${date}.json`),
+  jsonBulletin:      (date)   => _download(`/api/export/json/bulletin/${date}`, null, `wraith-${date}.json`),
+  jsonArticles:      (params) => _download("/api/export/json/articles", params, "wraith-articles.json"),
+  csvBulletin:       (date)   => _download(`/api/export/csv/bulletin/${date}`, null, `wraith-${date}.csv`),
+  csvArticles:       (params) => _download("/api/export/csv/articles", params, "wraith-articles.csv"),
+};

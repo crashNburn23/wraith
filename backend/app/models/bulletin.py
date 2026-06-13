@@ -1,4 +1,4 @@
-from sqlalchemy import String, Float, Integer, Date, DateTime, ForeignKey, JSON
+from sqlalchemy import String, Float, Integer, Boolean, Date, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin, new_uuid
 
@@ -43,6 +43,11 @@ class BulletinItem(Base, TimestampMixin):
     # Which past-feedback articles drove the feedback_signal — JSON list of
     # {article_id, title, overlap_reasons[], feedback_rating}
     feedback_signal_articles: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # Story clustering (set after bulletin build by clustering.py)
+    cluster_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    is_cluster_lead: Mapped[bool] = mapped_column(Boolean, default=True)
+    cluster_size: Mapped[int] = mapped_column(Integer, default=1)
 
     bulletin = relationship("Bulletin", back_populates="items")
     article = relationship("Article", back_populates="bulletin_items")

@@ -5,7 +5,14 @@ from app.core.config import settings
 @lru_cache(maxsize=1)
 def get_llm_client():
     if settings.LLM_PROVIDER == "anthropic":
-        import anthropic
+        if not settings.ANTHROPIC_API_KEY:
+            raise RuntimeError("LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY")
+        try:
+            import anthropic
+        except ImportError as e:
+            raise RuntimeError(
+                "Anthropic provider requires the 'anthropic' package; rerun ./start.sh setup"
+            ) from e
         return anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     # Default: Ollama via OpenAI-compatible API
     from openai import AsyncOpenAI

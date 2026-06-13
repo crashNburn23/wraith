@@ -7,6 +7,7 @@ class IOCOut(BaseModel):
     id: str
     ioc_type: str
     value: str
+    source_excerpt: Optional[str] = None
     user_note: Optional[str]
     model_config = {"from_attributes": True}
 
@@ -16,6 +17,7 @@ class TTPOut(BaseModel):
     technique_id: str
     technique_name: str
     tactic: Optional[str]
+    source_excerpt: Optional[str] = None
     user_note: Optional[str]
     model_config = {"from_attributes": True}
 
@@ -24,6 +26,7 @@ class ActorOut(BaseModel):
     id: str
     actor_id: str
     actor_name: str
+    source_excerpt: Optional[str] = None
     user_note: Optional[str]
     model_config = {"from_attributes": True}
 
@@ -31,6 +34,7 @@ class ActorOut(BaseModel):
 class CVEMentionOut(BaseModel):
     id: str
     cve_id: str
+    source_excerpt: Optional[str] = None
     user_note: Optional[str]
     model_config = {"from_attributes": True}
 

@@ -4,7 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { feedback as feedbackApi } from "../lib/api";
 import { categoryColor } from "../lib/utils";
 import { isTypingTarget } from "../lib/shortcuts";
+import { Spinner } from "./ui";
 import RawTextModal from "./RawTextModal";
+
+function Key({ k }) {
+  return (
+    <kbd className="text-[10px] font-mono text-slate-200 bg-navy-900 border border-navy-border rounded px-1.5 py-0.5">{k}</kbd>
+  );
+}
 
 // Full-screen one-article-at-a-time triage flow. Single-key actions, every
 // action auto-advances — the fastest way to feed the learning loop.
@@ -14,6 +21,8 @@ export default function TriageMode({ items, onClose }) {
   const [idx, setIdx] = useState(0);
   const [stats, setStats] = useState({ liked: 0, disliked: 0, dismissed: 0, skipped: 0 });
   const [rawOpen, setRawOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
   const done = idx >= items.length;
   const item = items[idx];
 
@@ -24,18 +33,32 @@ export default function TriageMode({ items, onClose }) {
     setIdx(i => i + 1);
   }, []);
 
-  const act = useCallback((action) => {
-    if (!item) return;
+  const act = useCallback(async (action) => {
+    if (!item || saving) return;
+    if (action === "skip") {
+      setError(null);
+      advance("skipped");
+      return;
+    }
     const id = item.article.id;
-    if (action === "like")    { feedbackApi.rate(id, 1);  advance("liked"); }
-    if (action === "dislike") { feedbackApi.rate(id, -1); advance("disliked"); }
-    if (action === "dismiss") { feedbackApi.setReadStatus(id, "dismissed"); advance("dismissed"); }
-    if (action === "skip")    { advance("skipped"); }
-  }, [item, advance]);
+    setSaving(true);
+    setError(null);
+    try {
+      if (action === "like") await feedbackApi.rate(id, 1);
+      if (action === "dislike") await feedbackApi.rate(id, -1);
+      if (action === "dismiss") await feedbackApi.setReadStatus(id, "dismissed");
+      advance(action === "like" ? "liked" : action === "dislike" ? "disliked" : "dismissed");
+    } catch (e) {
+      setError(e.response?.data?.detail || "Could not save this action. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  }, [item, saving, advance]);
 
   useEffect(() => {
     const handler = (e) => {
       if (isTypingTarget(e)) return;
+      if (saving) return;
       if (e.key === "e") { e.preventDefault(); if (!done && item) setRawOpen(v => !v); return; }
       if (rawOpen) return;  // modal absorbs remaining keys; it handles its own Escape
       if (e.key === "Escape" || e.key === "q" || e.key === "t") { e.preventDefault(); finish(); return; }
@@ -52,17 +75,13 @@ export default function TriageMode({ items, onClose }) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [act, done, item, rawOpen]);
+  }, [act, done, item, rawOpen, saving]);
 
   const finish = () => {
     qc.invalidateQueries({ queryKey: ["bulletin-today"] });
     qc.invalidateQueries({ queryKey: ["feedback-signal"] });
     onClose();
   };
-
-  const Key = ({ k }) => (
-    <kbd className="text-[10px] font-mono text-slate-200 bg-navy-900 border border-navy-border rounded px-1.5 py-0.5">{k}</kbd>
-  );
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-navy-950">
@@ -75,7 +94,7 @@ export default function TriageMode({ items, onClose }) {
         <span className="text-xs font-mono text-slate-500 tabular-nums">
           {done ? `${items.length} / ${items.length}` : `${idx + 1} / ${items.length}`}
         </span>
-        <button onClick={finish} className="text-[11px] font-mono text-slate-600 hover:text-slate-300 transition-colors">
+        <button disabled={saving} onClick={finish} className="text-[11px] font-mono text-slate-600 hover:text-slate-300 disabled:opacity-40 transition-colors">
           [esc] exit
         </button>
       </div>
@@ -106,7 +125,7 @@ export default function TriageMode({ items, onClose }) {
               ))}
             </div>
             <p className="text-[11px] text-slate-500 font-mono mb-4">
-              Every rating sharpens tomorrow's ranking.
+              Every rating sharpens tomorrow&apos;s ranking.
             </p>
             <button onClick={finish}
               className="text-xs font-mono px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white transition-colors">
@@ -129,6 +148,11 @@ export default function TriageMode({ items, onClose }) {
               )}
             </div>
             <h2 className="text-xl font-bold text-white leading-snug mb-6">{item.article.title}</h2>
+            {error && (
+              <p className="text-xs text-red-300 bg-red-900/20 border border-red-500/20 rounded-lg px-3 py-2 font-mono">
+                {error}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -136,6 +160,7 @@ export default function TriageMode({ items, onClose }) {
       {/* Action bar */}
       {!done && (
         <div className="flex items-center justify-center gap-5 px-6 py-4 border-t border-navy-border flex-shrink-0 flex-wrap">
+          {saving && <span className="flex items-center gap-1.5 text-[11px] text-brand-300"><Spinner size="sm" /> saving</span>}
           <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Key k="u" /> 👍 like</span>
           <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Key k="n" /> 👎 nope</span>
           <span className="flex items-center gap-1.5 text-[11px] text-slate-400"><Key k="m" /> dismiss</span>

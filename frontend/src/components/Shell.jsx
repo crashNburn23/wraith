@@ -36,6 +36,12 @@ const FeedbackIcon = () => (
   </svg>
 );
 
+const InvestigationsIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776" />
+  </svg>
+);
+
 const ShieldIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
@@ -43,11 +49,12 @@ const ShieldIcon = () => (
 );
 
 const links = [
-  { to: "/",         label: "Bulletin",  Icon: BulletinIcon },
-  { to: "/intel",    label: "Intel Hub", Icon: IntelIcon    },
-  { to: "/chat",     label: "Chat",      Icon: ChatIcon     },
-  { to: "/feedback", label: "Feedback",  Icon: FeedbackIcon },
-  { to: "/settings", label: "Settings",  Icon: SettingsIcon },
+  { to: "/",               label: "Bulletin",       Icon: BulletinIcon       },
+  { to: "/intel",          label: "Intel Hub",      Icon: IntelIcon          },
+  { to: "/investigations", label: "Investigations", Icon: InvestigationsIcon },
+  { to: "/chat",           label: "Chat",           Icon: ChatIcon           },
+  { to: "/feedback",       label: "Feedback",       Icon: FeedbackIcon       },
+  { to: "/settings",       label: "Settings",       Icon: SettingsIcon       },
 ];
 
 export default function Shell({ children }) {
@@ -65,7 +72,7 @@ export default function Shell({ children }) {
   // Global shortcuts: ? help · Ctrl+K palette · g-then-key page navigation.
   // All sequential keys — fully usable with one hand.
   useEffect(() => {
-    const PAGES = { b: "/", i: "/intel", c: "/chat", f: "/feedback", s: "/settings" };
+    const PAGES = { b: "/", i: "/intel", n: "/investigations", c: "/chat", f: "/feedback", s: "/settings" };
     const handler = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();

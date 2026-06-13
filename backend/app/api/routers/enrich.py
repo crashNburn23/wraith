@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -25,6 +26,10 @@ class WhitelistAdd(BaseModel):
     value: str
     ioc_type: str
     note: str | None = None
+
+
+_TTP_ID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$", re.IGNORECASE)
+_CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
 
 @router.post("/run")
@@ -205,15 +210,33 @@ def patch_entity(
     if body.user_note is not None:
         obj.user_note = body.user_note
     if body.value is not None:
-        original = _current_value()
-        if original and original != body.value:
-            record_correction(db, entity_type, "edited", original, body.value)
-        if entity_type == "ioc":
-            obj.value = body.value
-        elif entity_type == "ttp":
-            obj.technique_id = body.value
+        value = body.value.strip()
+        if not value:
+            raise HTTPException(400, "Entity value cannot be empty")
+        if entity_type == "actor":
+            raise HTTPException(400, "Actor renaming is not supported; edit the note or delete the article association")
+        if entity_type == "ttp":
+            if not _TTP_ID_RE.fullmatch(value):
+                raise HTTPException(400, "TTP value must be a MITRE ATT&CK technique ID such as T1566 or T1059.003")
+            value = value.upper()
         elif entity_type == "cve":
-            obj.cve_id = body.value
+            if not _CVE_ID_RE.fullmatch(value):
+                raise HTTPException(400, "CVE value must match CVE-YYYY-NNNN")
+            value = value.upper()
+        elif entity_type == "ioc":
+            from app.services.enrichment_runner import _validate_ioc
+            if not _validate_ioc(obj.ioc_type, value):
+                raise HTTPException(400, f"Invalid {obj.ioc_type} IOC value")
+
+        original = _current_value()
+        if original and original != value:
+            record_correction(db, entity_type, "edited", original, value)
+        if entity_type == "ioc":
+            obj.value = value
+        elif entity_type == "ttp":
+            obj.technique_id = value
+        elif entity_type == "cve":
+            obj.cve_id = value
 
     db.commit()
     return {"updated": True}

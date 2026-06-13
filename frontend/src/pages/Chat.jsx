@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { Button, Spinner } from "../components/ui";
+import { Button } from "../components/ui";
 import { getToken } from "../lib/auth";
 
 function Message({ role, content }) {
@@ -81,17 +81,21 @@ export default function Chat() {
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let assistantContent = "";
+      let buffer = "";
+      let streamDone = false;
       setMessages(prev => [...prev, { role: "assistant", content: "" }]);
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const lines = decoder.decode(value).split("\n");
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const raw = line.slice(6);
-          if (raw === "[DONE]") break;
-          try {
+      const consumeEvents = () => {
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() || "";
+        for (const event of events) {
+          for (const line of event.split(/\r?\n/)) {
+            if (!line.startsWith("data: ")) continue;
+            const raw = line.slice(6);
+            if (raw === "[DONE]") {
+              streamDone = true;
+              return;
+            }
             const { text } = JSON.parse(raw);
             assistantContent += text;
             setMessages(prev => {
@@ -99,8 +103,22 @@ export default function Chat() {
               copy[copy.length - 1] = { role: "assistant", content: assistantContent };
               return copy;
             });
-          } catch {}
+          }
         }
+      };
+
+      while (!streamDone) {
+        const { value, done } = await reader.read();
+        if (done) {
+          buffer += decoder.decode();
+          if (buffer.trim()) {
+            buffer += "\n\n";
+            consumeEvents();
+          }
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        consumeEvents();
       }
     } catch (e) {
       if (e.name !== "AbortError") setError(`Error: ${e.message}`);

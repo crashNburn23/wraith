@@ -1,4 +1,4 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional
 from datetime import datetime
 
@@ -19,15 +19,15 @@ class ScoringConfigOut(BaseModel):
 
 
 class ScoringConfigUpdate(BaseModel):
-    weight_ai_severity: Optional[float] = None
-    weight_feedback_signal: Optional[float] = None
-    weight_profile_match: Optional[float] = None
-    weight_kev_bonus: Optional[float] = None
-    weight_recency: Optional[float] = None
-    feedback_lookback_days: Optional[int] = None
-    recency_half_life_days: Optional[float] = None
-    min_feedback_articles: Optional[int] = None
-    feedback_decay_half_life_days: Optional[float] = None
+    weight_ai_severity: Optional[float] = Field(default=None, ge=0, le=1)
+    weight_feedback_signal: Optional[float] = Field(default=None, ge=0, le=1)
+    weight_profile_match: Optional[float] = Field(default=None, ge=0, le=1)
+    weight_kev_bonus: Optional[float] = Field(default=None, ge=0, le=1)
+    weight_recency: Optional[float] = Field(default=None, ge=0, le=1)
+    feedback_lookback_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    recency_half_life_days: Optional[float] = Field(default=None, gt=0, le=3650)
+    min_feedback_articles: Optional[int] = Field(default=None, ge=1, le=10000)
+    feedback_decay_half_life_days: Optional[float] = Field(default=None, gt=0, le=3650)
 
     @model_validator(mode="after")
     def weights_sum_to_one(self):

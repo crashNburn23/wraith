@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models import CVEMention, CVERecord
 from app.core.config import settings
 from app.services.llm_client import llm_complete
+from app.services.prompt_safety import UNTRUSTED_CONTENT_RULE, untrusted_block
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,8 @@ async def _plain_english_summary(cve_id: str, description: str) -> str | None:
         text = await llm_complete(
             f"Rewrite this CVE description as ONE plain-English sentence for a security "
             f"analyst: what is affected and what an attacker can do. No jargon beyond "
-            f"product names, no CVE id, no preamble.\n\n{cve_id}: {description[:1500]}",
+            f"product names, no CVE id, no preamble.\n{UNTRUSTED_CONTENT_RULE}\n\n"
+            f"{untrusted_block(cve_id, description, 1500)}",
             max_tokens=120,
         )
         return text.strip().strip('"') or None

@@ -22,6 +22,8 @@ export default function FeedbackButtons({ articleId, article, initialRating = nu
   const qc = useQueryClient();
   const [rated, setRated] = useState(initialRating);
   const [reasonTags, setReasonTags] = useState(initialReasonTags || []);
+  const [error, setError] = useState(null);
+  const [savingTags, setSavingTags] = useState(false);
 
   useEffect(() => { setRated(initialRating); }, [initialRating]);
   useEffect(() => { setReasonTags(initialReasonTags || []); }, [initialReasonTags]);
@@ -29,19 +31,33 @@ export default function FeedbackButtons({ articleId, article, initialRating = nu
   const rateMut = useMutation({
     mutationFn: ({ rating }) => feedbackApi.rate(articleId, rating),
     onSuccess: (_, { rating }) => {
+      setError(null);
       setRated(rating);
       if (rating !== -1) setReasonTags([]);
       qc.invalidateQueries({ queryKey: ["bulletin-today"] });
       qc.invalidateQueries({ queryKey: ["feedback-signal"] });
     },
+    onError: (e) => setError(e.response?.data?.detail || "Could not save rating"),
   });
 
-  const toggleTag = (key) => {
+  const toggleTag = async (key) => {
+    if (savingTags) return;
+    const previous = reasonTags;
     const next = reasonTags.includes(key)
       ? reasonTags.filter(t => t !== key)
       : [...reasonTags, key];
     setReasonTags(next);
-    feedbackApi.setReasons(articleId, next);
+    setError(null);
+    setSavingTags(true);
+    try {
+      await feedbackApi.setReasons(articleId, next);
+      qc.invalidateQueries({ queryKey: ["feedback-signal"] });
+    } catch (e) {
+      setReasonTags(previous);
+      setError(e.response?.data?.detail || "Could not save reason tags");
+    } finally {
+      setSavingTags(false);
+    }
   };
 
   const availableTags = buildReasonTags(article);
@@ -70,6 +86,7 @@ export default function FeedbackButtons({ articleId, article, initialRating = nu
             <button
               key={tag.key}
               onClick={() => toggleTag(tag.key)}
+              disabled={savingTags}
               className={`text-[9px] px-1.5 py-0.5 rounded font-mono transition-colors border ${
                 reasonTags.includes(tag.key)
                   ? "bg-red-900/40 text-red-300 border-red-500/40"
@@ -81,6 +98,7 @@ export default function FeedbackButtons({ articleId, article, initialRating = nu
           ))}
         </div>
       )}
+      {error && <p className="mt-1 text-[10px] text-red-400 font-mono">{error}</p>}
     </div>
   );
 }

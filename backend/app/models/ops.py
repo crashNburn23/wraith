@@ -1,4 +1,4 @@
-from sqlalchemy import String, Boolean, Text, DateTime, JSON
+from sqlalchemy import String, Boolean, Text, DateTime, JSON, Integer, Float
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, TimestampMixin, new_uuid
 
@@ -43,3 +43,19 @@ class WatchlistItem(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     item_type: Mapped[str] = mapped_column(String(20), nullable=False)  # actor | cve | keyword
     value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SavedSearch(Base, TimestampMixin):
+    """Analyst-saved Intel Hub filter with optional alert rule."""
+    __tablename__ = "saved_searches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Search filter params (subset of /api/search query params)
+    filters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    alert_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Minimum severity for an article to trigger an alert (0 = any)
+    alert_severity_min: Mapped[float] = mapped_column(Float, default=0.0)
+    last_alerted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Running total of articles ever matched
+    match_count: Mapped[int] = mapped_column(Integer, default=0)

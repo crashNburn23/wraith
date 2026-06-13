@@ -13,10 +13,18 @@ Data retention policy (runs weekly via scheduler):
 import logging
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, not_, exists
+from sqlalchemy import not_, exists
 from app.models import Article, BulletinItem
 
 logger = logging.getLogger(__name__)
+
+
+def _delete_articles(db: Session, query) -> int:
+    """Delete through the ORM so Article relationship cascades are honored."""
+    articles = query.all()
+    for article in articles:
+        db.delete(article)
+    return len(articles)
 
 
 def prune(db: Session) -> dict:
@@ -40,32 +48,31 @@ def prune(db: Session) -> dict:
 
     # 2. Delete error/no_text articles older than 14 days
     cutoff_14 = now - timedelta(days=14)
+    in_bulletin = exists().where(BulletinItem.article_id == Article.id)
     q = db.query(Article).filter(
         Article.enrichment_status.in_(["error", "no_text"]),
         Article.created_at < cutoff_14,
+        not_(in_bulletin),
     )
-    counts["deleted_error_articles"] = q.count()
-    q.delete(synchronize_session=False)
+    counts["deleted_error_articles"] = _delete_articles(db, q)
 
     # 3. Delete pending articles older than 30 days
     cutoff_30 = now - timedelta(days=30)
     q = db.query(Article).filter(
         Article.enrichment_status == "pending",
         Article.created_at < cutoff_30,
+        not_(in_bulletin),
     )
-    counts["deleted_stale_pending"] = q.count()
-    q.delete(synchronize_session=False)
+    counts["deleted_stale_pending"] = _delete_articles(db, q)
 
     # 4. Delete enriched articles not in any bulletin, older than 90 days
     cutoff_90 = now - timedelta(days=90)
-    in_bulletin = exists().where(BulletinItem.article_id == Article.id)
     q = db.query(Article).filter(
         Article.enrichment_status == "enriched",
         Article.enriched_at < cutoff_90,
         not_(in_bulletin),
     )
-    counts["deleted_old_unbulleted"] = q.count()
-    q.delete(synchronize_session=False)
+    counts["deleted_old_unbulleted"] = _delete_articles(db, q)
 
     db.commit()
     logger.info("Pruning complete: %s", counts)

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { search, cve as cveApi, enrich as enrichApi } from "../lib/api";
-import { Input, Select, Tabs, Spinner, Badge, SeverityBadge } from "../components/ui";
+import { search, cve as cveApi, enrich as enrichApi, searches as savedSearchesApi } from "../lib/api";
+import { Input, Select, Tabs, Spinner, Badge, SeverityBadge, Button } from "../components/ui";
 import { formatDate, timeAgo, categoryColor, severityBg } from "../lib/utils";
 import { useEntityModal } from "../components/EntityModalContext";
+import { AddToInvestigationModal } from "../components/AddToInvestigation";
 
 const TABS = [
   { id: "articles", label: "Articles" },
@@ -17,11 +18,66 @@ const CATEGORIES = ["", "Malware", "Ransomware", "APT", "Phishing", "Vulnerabili
 
 // ─── Articles tab ─────────────────────────────────────────────────────────────
 
+function SaveSearchModal({ filters, onClose }) {
+  const [name, setName] = useState("");
+  const [alertEnabled, setAlertEnabled] = useState(false);
+  const [severityMin, setSeverityMin] = useState(0);
+  const qc = useQueryClient();
+
+  const save = useMutation({
+    mutationFn: () => savedSearchesApi.create({
+      name: name.trim(),
+      filters,
+      alert_enabled: alertEnabled,
+      alert_severity_min: alertEnabled ? Number(severityMin) : 0,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["saved-searches"] });
+      onClose();
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-navy-900 border border-navy-border rounded-xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <h2 className="text-sm font-semibold text-white mb-4">Save Search</h2>
+        <div className="text-[11px] text-slate-500 font-mono mb-3 p-2 bg-navy-800 rounded border border-navy-border">
+          {Object.entries(filters).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(" · ") || "all articles"}
+        </div>
+        <label className="block text-xs text-slate-500 mb-1">Name</label>
+        <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. High-sev Ransomware" className="w-full mb-3" autoFocus />
+        <label className="flex items-center gap-2 mb-3 cursor-pointer">
+          <input type="checkbox" checked={alertEnabled} onChange={e => setAlertEnabled(e.target.checked)} className="accent-brand-500" />
+          <span className="text-xs text-slate-300">Alert when new matches appear</span>
+        </label>
+        {alertEnabled && (
+          <div className="mb-3">
+            <label className="block text-xs text-slate-500 mb-1">Min severity for alert</label>
+            <Select value={severityMin} onChange={e => setSeverityMin(e.target.value)} className="w-full">
+              <option value="0">Any</option>
+              <option value="50">Medium (50+)</option>
+              <option value="75">High (75+)</option>
+            </Select>
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => save.mutate()} disabled={!name.trim() || save.isPending}>
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ArticlesTab() {
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
   const [sevMin, setSevMin] = useState("");
   const [page, setPage] = useState(1);
+  const [showSaveSearch, setShowSaveSearch] = useState(false);
+  const [addToInv, setAddToInv] = useState(null); // { id, title }
 
   const { data, isLoading } = useQuery({
     queryKey: ["search-articles", q, category, sevMin, page],
@@ -29,8 +85,20 @@ function ArticlesTab() {
     placeholderData: (prev) => prev,
   });
 
+  const activeFilters = { q: q || undefined, category: category || undefined, severity_min: sevMin || undefined };
+
   return (
     <div className="p-5">
+      {showSaveSearch && (
+        <SaveSearchModal filters={activeFilters} onClose={() => setShowSaveSearch(false)} />
+      )}
+      {addToInv && (
+        <AddToInvestigationModal
+          articleId={addToInv.id}
+          articleTitle={addToInv.title}
+          onClose={() => setAddToInv(null)}
+        />
+      )}
       <div className="flex gap-2 mb-5 flex-wrap">
         <Input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="Search title / summary…" className="flex-1 min-w-48" />
         <Select value={category} onChange={e => { setCategory(e.target.value); setPage(1); }}>
@@ -42,6 +110,9 @@ function ArticlesTab() {
           <option value="50">Medium (50+)</option>
           <option value="25">Low (25+)</option>
         </Select>
+        <Button variant="ghost" size="sm" onClick={() => setShowSaveSearch(true)} title="Save this search as an alert">
+          ☆ Save
+        </Button>
       </div>
 
       {isLoading ? <div className="flex justify-center py-10"><Spinner /></div> : (
@@ -67,6 +138,13 @@ function ArticlesTab() {
                   <Link to={`/articles/${a.id}`} className="text-sm text-slate-200 hover:text-white font-medium leading-snug">{a.title}</Link>
                   {a.ai_summary && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{a.ai_summary}</p>}
                 </div>
+                <button
+                  onClick={() => setAddToInv({ id: a.id, title: a.title })}
+                  className="opacity-0 group-hover:opacity-100 flex-shrink-0 text-[10px] text-slate-600 hover:text-brand-400 font-mono transition-all mt-1"
+                  title="Add to investigation"
+                >
+                  +inv
+                </button>
               </div>
             ))}
           </div>

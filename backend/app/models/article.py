@@ -17,6 +17,9 @@ class Article(Base, TimestampMixin):
     # Enrichment lifecycle
     enrichment_status: Mapped[str] = mapped_column(String(50), default="pending")
     enriched_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enrichment_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    enrichment_prompt_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    enrichment_schema_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Feed-extracted metadata
     og_image: Mapped[str | None] = mapped_column(Text, nullable=True)

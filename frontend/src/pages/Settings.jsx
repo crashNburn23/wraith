@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { sources as sourcesApi, ingest, enrich as enrichApi, bulletin as bulletinApi, settings as settingsApi, cve, feedback as feedbackApi } from "../lib/api";
+import { sources as sourcesApi, ingest, enrich as enrichApi, bulletin as bulletinApi, settings as settingsApi, cve, feedback as feedbackApi, searches as savedSearchesApi } from "../lib/api";
 import { Button, Input, Card, Spinner, Divider } from "../components/ui";
 
 function TagInput({ tags, onChange, placeholder, color = "bg-navy-800 border-navy-border text-slate-300" }) {
@@ -207,7 +207,7 @@ function EnrichTracker() {
   const run = data?.current_run;
   const isRunning = run?.status === "running";
   const isPaused = run?.status === "paused" || data?.paused;
-  const isStopped = run?.status === "stopped";
+  const _isStopped = run?.status === "stopped";
   const pct = run?.total > 0 ? Math.round((run.processed / run.total) * 100) : 0;
 
   return (
@@ -1142,6 +1142,64 @@ function StorageSection() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+function SavedSearchesSection() {
+  const qc = useQueryClient();
+  const { data: searches = [], isLoading } = useQuery({
+    queryKey: ["saved-searches"],
+    queryFn: savedSearchesApi.list,
+  });
+
+  const del = useMutation({
+    mutationFn: savedSearchesApi.delete,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-searches"] }),
+  });
+
+  const toggleAlert = useMutation({
+    mutationFn: ({ id, enabled }) => savedSearchesApi.update(id, { alert_enabled: enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["saved-searches"] }),
+  });
+
+  if (isLoading) return <Card className="p-5"><Spinner /></Card>;
+
+  return (
+    <Card>
+      <div className="p-5 border-b border-navy-border">
+        <h2 className="text-sm font-semibold text-white">Saved Searches</h2>
+        <p className="text-xs text-slate-500 mt-0.5">Saved from Intel Hub. Enable alerts to get webhook notifications on new matches.</p>
+      </div>
+      <div className="divide-y divide-navy-border">
+        {searches.length === 0 ? (
+          <p className="p-5 text-xs text-slate-600">No saved searches. Use ☆ Save in Intel Hub → Articles.</p>
+        ) : searches.map(s => (
+          <div key={s.id} className="flex items-center gap-3 px-5 py-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-slate-200 font-medium truncate">{s.name}</p>
+              <p className="text-[11px] text-slate-600 font-mono truncate">
+                {Object.entries(s.filters || {}).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(" · ") || "all articles"}
+                {s.match_count > 0 && <span className="ml-2 text-brand-400/60">{s.match_count} matches</span>}
+              </p>
+            </div>
+            <label className="flex items-center gap-1.5 cursor-pointer" title="Enable webhook alert on new matches">
+              <input
+                type="checkbox"
+                checked={s.alert_enabled}
+                onChange={e => toggleAlert.mutate({ id: s.id, enabled: e.target.checked })}
+                className="accent-brand-500"
+              />
+              <span className="text-[11px] text-slate-500 font-mono">alert</span>
+            </label>
+            <button
+              onClick={() => del.mutate(s.id)}
+              className="text-slate-700 hover:text-red-400 text-xs transition-colors"
+              title="Delete"
+            >✕</button>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 export default function Settings() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
@@ -1149,6 +1207,7 @@ export default function Settings() {
       <ControlsSection />
       <ProfileSection />
       <WatchlistSection />
+      <SavedSearchesSection />
       <NaturalLanguageFeedbackSection />
       <ScoringSection />
       <SystemPromptSection />

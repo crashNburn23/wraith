@@ -7,6 +7,7 @@ import {
   settings as settingsApi,
   articles as articlesApi,
   ingest as ingestApi,
+  exports as exportsApi,
 } from "../lib/api";
 import { Button, Spinner, EmptyState, SeverityBadge } from "../components/ui";
 import { ScoreBreakdownPanel } from "../components/ScoreBreakdown";
@@ -80,6 +81,7 @@ function ReadStatusCycle({ articleId, status, onChange }) {
       onClick={toggle}
       className={`text-sm leading-none flex-shrink-0 ${colors[status] || colors.unread} hover:opacity-70 transition-opacity`}
       title={`Mark ${cycle[status] || "unread"} [i]`}
+      aria-label={`Status: ${status}. Click to mark ${cycle[status] || "unread"}`}
     >
       {labels[status] || "○"}
     </button>
@@ -88,27 +90,30 @@ function ReadStatusCycle({ articleId, status, onChange }) {
 
 // ─── Left panel: compact list row ────────────────────────────────────────────
 
-function BulletinListRow({ item, status, selected, dimmed, onSelect, onStatusChange }) {
+function BulletinListRow({ item, status, selected, dimmed, isMember, visibleMemberCount, clusterExpanded, onSelect, onStatusChange, onToggleCluster }) {
   const { article, score, rank } = item;
   const c = cyberColor(score.computed_score);
   const val = Math.round(score.computed_score * 100);
   const why = topScoreDriver(score);
+  const showClusterToggle = item.is_cluster_lead && visibleMemberCount > 0;
 
   return (
     <div
       onClick={onSelect}
       style={{
-        borderLeft: `2px solid ${selected ? "#5558D4" : "transparent"}`,
-        background: selected ? "rgba(85,88,212,0.08)" : "transparent",
+        borderLeft: `2px solid ${selected ? "#5558D4" : isMember ? c.border : "transparent"}`,
+        background: selected
+          ? "rgba(85,88,212,0.08)"
+          : isMember ? "rgba(0,0,0,0.20)" : "transparent",
         opacity: dimmed ? 0.4 : 1,
         borderBottom: "1px solid rgba(255,255,255,0.035)",
       }}
-      className="flex items-start gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-white/[0.025] transition-colors"
+      className={`flex items-start gap-2.5 py-2.5 cursor-pointer hover:bg-white/[0.025] transition-colors ${isMember ? "pl-6 pr-3" : "px-3"}`}
     >
-      {/* Score tier — color only, no numbers; exact score lives in the reading pane */}
+      {/* Score tier bar — dimmer for cluster members */}
       <span
         className="w-[3px] self-stretch rounded-full flex-shrink-0"
-        style={{ background: c.hex, opacity: 0.75, minHeight: 28 }}
+        style={{ background: c.hex, opacity: isMember ? 0.35 : 0.75, minHeight: 28 }}
         title={`Rank ${rank} · ranking score ${val}/100`}
       />
 
@@ -118,12 +123,12 @@ function BulletinListRow({ item, status, selected, dimmed, onSelect, onStatusCha
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1 mb-0.5">
-          {article.threat_category && (
+          {article.threat_category && !isMember && (
             <span className={`text-[9px] uppercase tracking-wide font-semibold px-1 rounded leading-tight ${categoryColor(article.threat_category)}`}>
               {article.threat_category}
             </span>
           )}
-          {why && (
+          {why && !isMember && (
             <span
               className="text-[8px] font-mono px-1 rounded leading-tight"
               style={{ color: c.hex, border: `1px solid ${c.border}`, opacity: 0.8 }}
@@ -134,9 +139,18 @@ function BulletinListRow({ item, status, selected, dimmed, onSelect, onStatusCha
           )}
           <span className="text-[9px] text-slate-600 ml-auto font-mono flex-shrink-0">{timeAgo(article.published_at)}</span>
         </div>
-        <p className={`text-xs leading-snug line-clamp-2 ${selected ? "text-white font-medium" : "text-slate-300"}`}>
+        <p className={`text-xs leading-snug line-clamp-2 ${selected ? "text-white font-medium" : isMember ? "text-slate-500" : "text-slate-300"}`}>
           {article.title}
         </p>
+        {showClusterToggle && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleCluster(); }}
+            className="mt-1 text-[9px] font-mono transition-opacity hover:opacity-100"
+            style={{ color: c.hex, opacity: 0.6 }}
+          >
+            {clusterExpanded ? "▾" : "▸"} {visibleMemberCount} related
+          </button>
+        )}
       </div>
     </div>
   );
@@ -144,15 +158,24 @@ function BulletinListRow({ item, status, selected, dimmed, onSelect, onStatusCha
 
 // ─── Reading pane: top navigation bar ────────────────────────────────────────
 
-function ReadingNav({ selectedIdx, total, onPrev, onNext, onDeselect, articleId }) {
+function ReadingNav({ selectedIdx, total, onPrev, onNext, onDeselect, onBackToList, articleId, isMobile }) {
   const navigate = useNavigate();
 
   if (selectedIdx === null) {
     return (
       <div
-        className="flex items-center px-5 border-b border-navy-border flex-shrink-0"
+        className="flex items-center gap-3 px-5 border-b border-navy-border flex-shrink-0"
         style={{ background: "#070d1b", height: 41 }}
       >
+        {isMobile && (
+          <button
+            onClick={onBackToList}
+            className="text-[11px] font-mono text-slate-500 hover:text-slate-200 transition-colors"
+            aria-label="Back to list"
+          >
+            ← list
+          </button>
+        )}
         <span
           className="text-[10px] font-mono font-bold uppercase tracking-widest px-1.5 py-0.5 rounded"
           style={{ background: "rgba(85,88,212,0.15)", color: "rgba(85,88,212,0.9)", border: "1px solid rgba(85,88,212,0.3)" }}
@@ -168,31 +191,45 @@ function ReadingNav({ selectedIdx, total, onPrev, onNext, onDeselect, articleId 
       className="flex items-center gap-1 px-4 border-b border-navy-border flex-shrink-0"
       style={{ background: "#070d1b", height: 41 }}
     >
-      <button
-        onClick={onPrev}
-        disabled={selectedIdx === 0}
-        className="px-2 py-1 text-[11px] font-mono text-slate-500 hover:text-slate-200 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
-      >
-        ← prev
-      </button>
-      <span className="text-[10px] font-mono text-slate-600 px-1 tabular-nums">{selectedIdx + 1} / {total}</span>
-      <button
-        onClick={onNext}
-        disabled={selectedIdx === total - 1}
-        className="px-2 py-1 text-[11px] font-mono text-slate-500 hover:text-slate-200 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
-      >
-        next →
-      </button>
+      {isMobile ? (
+        <button
+          onClick={onBackToList}
+          className="px-2 py-1 text-[11px] font-mono text-slate-500 hover:text-slate-200 transition-colors"
+          aria-label="Back to list"
+        >
+          ← list
+        </button>
+      ) : (
+        <>
+          <button
+            onClick={onPrev}
+            disabled={selectedIdx === 0}
+            className="px-2 py-1 text-[11px] font-mono text-slate-500 hover:text-slate-200 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+            aria-label="Previous article"
+          >
+            ← prev
+          </button>
+          <span className="text-[10px] font-mono text-slate-600 px-1 tabular-nums">{selectedIdx + 1} / {total}</span>
+          <button
+            onClick={onNext}
+            disabled={selectedIdx === total - 1}
+            className="px-2 py-1 text-[11px] font-mono text-slate-500 hover:text-slate-200 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+            aria-label="Next article"
+          >
+            next →
+          </button>
 
-      <div className="w-px h-3 bg-navy-border mx-2" />
+          <div className="w-px h-3 bg-navy-border mx-2" />
 
-      <button
-        onClick={onDeselect}
-        className="text-[10px] font-mono text-slate-600 hover:text-slate-300 px-1 transition-colors"
-        title="Back to brief [h]"
-      >
-        ← brief
-      </button>
+          <button
+            onClick={onDeselect}
+            className="text-[10px] font-mono text-slate-600 hover:text-slate-300 px-1 transition-colors"
+            title="Back to brief [h]"
+          >
+            ← brief
+          </button>
+        </>
+      )}
 
       <div className="flex-1" />
 
@@ -285,17 +322,26 @@ function BriefPane({ brief, briefSources, briefGeneratedAt, bulletinDate, newCou
 
 // ─── Reading pane: entity list (read-only) ────────────────────────────────────
 
-function EntityList({ title, items, render }) {
+function EntityList({ title, items, render, getExcerpt }) {
   if (!items?.length) return null;
   return (
     <div>
       <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest font-mono mb-2">{title}</div>
       <div className="flex flex-wrap gap-1.5">
-        {items.map((item, i) => (
-          <span key={i} className="text-xs font-mono text-slate-300 px-2 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
-            {render(item)}
-          </span>
-        ))}
+        {items.map((item, i) => {
+          const excerpt = getExcerpt?.(item);
+          return (
+            <span
+              key={i}
+              title={excerpt || undefined}
+              className="inline-flex items-center gap-1 text-xs font-mono text-slate-300 px-2 py-0.5 rounded"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+            >
+              {render(item)}
+              {excerpt && <span className="text-[9px] opacity-35">❝</span>}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
@@ -392,18 +438,19 @@ function ArticlePane({ item, status, onHide, onStatusChange }) {
 
       {/* Entities */}
       {hasEntities && (
-        <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
           <div className="p-3 rounded-xl space-y-3" style={neonCard(NEON.cyan)}>
-            <EntityList title="IOCs" items={article.iocs} render={i => i.value} />
-            <EntityList title="CVEs" items={article.cve_mentions} render={i => i.cve_id} />
+            <EntityList title="IOCs" items={article.iocs} render={i => i.value} getExcerpt={i => i.source_excerpt} />
+            <EntityList title="CVEs" items={article.cve_mentions} render={i => i.cve_id} getExcerpt={i => i.source_excerpt} />
           </div>
           <div className="p-3 rounded-xl space-y-3" style={neonCard(NEON.violet)}>
             <EntityList
               title="MITRE TTPs"
               items={article.ttp_tags}
               render={i => i.technique_id ? `${i.technique_id}${i.technique_name ? " · " + i.technique_name : ""}` : (i.value || "—")}
+              getExcerpt={i => i.source_excerpt}
             />
-            <EntityList title="Threat Actors" items={article.article_actors} render={i => i.actor_name} />
+            <EntityList title="Threat Actors" items={article.article_actors} render={i => i.actor_name} getExcerpt={i => i.source_excerpt} />
           </div>
         </div>
       )}
@@ -454,11 +501,15 @@ export default function Bulletin() {
   const navigate = useNavigate();
   // Optimistic read-status overrides on top of server state (DB is the source of truth)
   const [statusOverrides, setStatusOverrides] = useState({});
+  const [statusError, setStatusError] = useState(null);
   const [showHidden, setShowHidden] = useState(false);
+  const [expandedClusters, setExpandedClusters] = useState(new Set());
   const [page, setPage] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(null); // null = show brief
   const [triageOpen, setTriageOpen] = useState(false);
   const [splitPct, setSplitPct] = useState(loadSplit);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [mobileView, setMobileView] = useState("list"); // "list" | "brief" — only on mobile, overridden by selectedIdx
   const autoBuilt = useRef(false);
   const [waitingForBrief, setWaitingForBrief] = useState(false);
   const prevBriefGenAt = useRef(null);
@@ -536,26 +587,43 @@ export default function Bulletin() {
   );
 
   const setStatus = useCallback((articleId, status) => {
+    const serverStatus = data?.items?.find(i => i.article.id === articleId)?.read_status ?? "unread";
     setStatusOverrides(prev => ({ ...prev, [articleId]: status }));
+    setStatusError(null);
     feedbackApi.setReadStatus(articleId, status).then(() => {
       qc.invalidateQueries({ queryKey: ["feedback-signal"] });
+    }).catch((e) => {
+      setStatusOverrides(prev => ({ ...prev, [articleId]: serverStatus }));
+      setStatusError(e.response?.data?.detail || "Could not save read status");
     });
-  }, [qc]);
+  }, [data, qc]);
 
   const dismissArticle = useCallback((articleId) => {
     setStatus(articleId, "dismissed");
   }, [setStatus]);
 
-  const undismissAll = useCallback(() => {
+  const undismissAll = useCallback(async () => {
     const dismissed = (data?.items || []).filter(i => effectiveStatus(i) === "dismissed");
-    dismissed.forEach(i => {
-      setStatusOverrides(prev => ({ ...prev, [i.article.id]: "unread" }));
-      feedbackApi.setReadStatus(i.article.id, "unread");
-    });
+    const ids = dismissed.map(i => i.article.id);
+    setStatusOverrides(prev => ({
+      ...prev,
+      ...Object.fromEntries(ids.map(id => [id, "unread"])),
+    }));
+    setStatusError(null);
     setShowHidden(false);
     setPage(0);
     setSelectedIdx(null);
-    setTimeout(() => qc.invalidateQueries({ queryKey: ["bulletin-today"] }), 500);
+    const results = await Promise.allSettled(ids.map(id => feedbackApi.setReadStatus(id, "unread")));
+    const failedIds = ids.filter((_, index) => results[index].status === "rejected");
+    if (failedIds.length) {
+      setStatusOverrides(prev => ({
+        ...prev,
+        ...Object.fromEntries(failedIds.map(id => [id, "dismissed"])),
+      }));
+      setStatusError(`Could not restore ${failedIds.length} dismissed article${failedIds.length === 1 ? "" : "s"}`);
+    }
+    qc.invalidateQueries({ queryKey: ["bulletin-today"] });
+    qc.invalidateQueries({ queryKey: ["feedback-signal"] });
   }, [data, effectiveStatus, qc]);
 
   useEffect(() => { setPage(0); setSelectedIdx(null); }, [showHidden]);
@@ -573,6 +641,13 @@ export default function Bulletin() {
       rowRefs.current[selectedIdx]?.scrollIntoView({ block: "nearest" });
     }
   }, [selectedIdx]);
+
+  // Track viewport width for mobile layout
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   // Resizable split
   useEffect(() => {
@@ -695,15 +770,56 @@ export default function Bulletin() {
   if (isLoading) return <div className="flex justify-center mt-20"><Spinner size="lg" /></div>;
   if (error)     return <div className="p-8 text-red-400 font-mono">Error loading bulletin.</div>;
 
-  const allItems     = data?.items || [];
-  const hiddenCount  = allItems.filter(item => effectiveStatus(item) === "dismissed").length;
-  const visibleItems = showHidden ? allItems : allItems.filter(item => effectiveStatus(item) !== "dismissed");
+  const allItems    = data?.items || [];
+  const hiddenCount = allItems.filter(item => effectiveStatus(item) === "dismissed").length;
+  const flatVisible = showHidden ? allItems : allItems.filter(item => effectiveStatus(item) !== "dismissed");
+
+  // Build per-cluster member lists from the flat visible set
+  const clusterMemberMap = {};
+  for (const item of flatVisible) {
+    if (item.cluster_id && !item.is_cluster_lead) {
+      if (!clusterMemberMap[item.cluster_id]) clusterMemberMap[item.cluster_id] = [];
+      clusterMemberMap[item.cluster_id].push(item);
+    }
+  }
+  // Track which cluster leads are visible (so orphaned members can appear standalone)
+  const visibleLeadClusters = new Set(
+    flatVisible.filter(i => i.cluster_id && i.is_cluster_lead).map(i => i.cluster_id)
+  );
+
+  // Final ordered list: leads/singletons in rank order; expanded members injected after lead.
+  // Members are always skipped at their natural rank position when their lead is visible —
+  // they only appear via injection after the lead when expanded.
+  const visibleItems = [];
+  for (const item of flatVisible) {
+    if (item.cluster_id && !item.is_cluster_lead && visibleLeadClusters.has(item.cluster_id)) {
+      continue;
+    }
+    visibleItems.push(item);
+    if (item.cluster_id && item.is_cluster_lead && expandedClusters.has(item.cluster_id)) {
+      visibleItems.push(...(clusterMemberMap[item.cluster_id] || []));
+    }
+  }
+
+  const toggleCluster = (clusterId) => {
+    setExpandedClusters(prev => {
+      const next = new Set(prev);
+      if (next.has(clusterId)) next.delete(clusterId); else next.add(clusterId);
+      return next;
+    });
+    setSelectedIdx(null); // reset selection when list shape changes
+  };
+
   const totalPages   = Math.ceil(visibleItems.length / PAGE_SIZE);
   const pagedItems   = visibleItems.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const selectedItem = selectedIdx !== null ? (pagedItems[selectedIdx] ?? null) : null;
-  const triageItems  = visibleItems.filter(i => !i.user_rating);
+  const triageItems  = flatVisible.filter(i => !i.user_rating);
 
   const noArticlesYet = (pipelineStatus?.articles?.total ?? null) === 0;
+
+  // On mobile, selectedIdx takes over (shows reading pane). mobileView controls list vs brief.
+  const showLeftPanel  = !isMobile || (selectedIdx === null && mobileView === "list");
+  const showRightPanel = !isMobile || selectedIdx !== null || mobileView === "brief";
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -712,7 +828,18 @@ export default function Bulletin() {
       )}
 
       {/* ── Left: bulletin list ─────────────────────────────────────────────── */}
-      <div className="flex flex-col border-r border-navy-border flex-shrink-0" style={{ width: `${splitPct}%` }}>
+      <div
+        className="flex flex-col border-r border-navy-border flex-shrink-0"
+        style={{
+          width: isMobile ? "100%" : `${splitPct}%`,
+          display: showLeftPanel ? "flex" : "none",
+        }}
+      >
+        {statusError && (
+          <div className="px-3 py-2 text-[10px] font-mono text-red-300 bg-red-900/20 border-b border-red-500/20">
+            {statusError}
+          </div>
+        )}
         {/* Header */}
         <div className="flex-shrink-0 px-4 py-3 border-b border-navy-border" style={{ background: "#070d1b" }}>
           <div className="flex items-center justify-between gap-2 mb-2">
@@ -728,10 +855,46 @@ export default function Bulletin() {
               </div>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
+              {isMobile && (
+                <button
+                  onClick={() => setMobileView("brief")}
+                  className="text-[10px] font-mono px-2 py-1 rounded border transition-colors"
+                  style={{ color: "rgba(85,88,212,0.8)", borderColor: "rgba(85,88,212,0.3)" }}
+                  aria-label="Show daily brief"
+                >
+                  Brief
+                </button>
+              )}
               {triageItems.length > 0 && (
                 <Button size="sm" variant="secondary" onClick={() => setTriageOpen(true)} title="Triage mode [t]">
                   Triage {triageItems.length}
                 </Button>
+              )}
+              {data?.bulletin_date && (
+                <div className="relative group">
+                  <button
+                    className="text-[10px] font-mono px-2 py-1 rounded border border-navy-border text-slate-500 hover:text-slate-300 hover:border-slate-600 transition-colors"
+                    title="Export bulletin"
+                  >
+                    Export ▾
+                  </button>
+                  <div className="absolute right-0 top-full mt-1 bg-navy-800 border border-navy-border rounded-lg shadow-xl z-20 min-w-32 hidden group-hover:block">
+                    {[
+                      { label: "STIX 2.1",  fn: () => exportsApi.stixBulletin(data.bulletin_date) },
+                      { label: "MISP",      fn: () => exportsApi.mispBulletin(data.bulletin_date) },
+                      { label: "JSON",      fn: () => exportsApi.jsonBulletin(data.bulletin_date) },
+                      { label: "CSV",       fn: () => exportsApi.csvBulletin(data.bulletin_date)  },
+                    ].map(({ label, fn }) => (
+                      <button
+                        key={label}
+                        onClick={fn}
+                        className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-navy-700 transition-colors first:rounded-t-lg last:rounded-b-lg"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
               <Button
                 onClick={() => {
@@ -806,8 +969,12 @@ export default function Bulletin() {
                   status={effectiveStatus(item)}
                   selected={selectedIdx === idx}
                   dimmed={showHidden && effectiveStatus(item) === "dismissed"}
-                  onSelect={() => setSelectedIdx(idx)}
+                  isMember={!!(item.cluster_id && !item.is_cluster_lead)}
+                  visibleMemberCount={item.cluster_id && item.is_cluster_lead ? (clusterMemberMap[item.cluster_id]?.length || 0) : 0}
+                  clusterExpanded={item.cluster_id ? expandedClusters.has(item.cluster_id) : false}
+                  onSelect={() => { setSelectedIdx(idx); if (isMobile) setMobileView("list"); }}
                   onStatusChange={setStatus}
+                  onToggleCluster={item.cluster_id && item.is_cluster_lead ? () => toggleCluster(item.cluster_id) : undefined}
                 />
               </div>
             ))
@@ -841,23 +1008,34 @@ export default function Bulletin() {
         </div>
       </div>
 
-      {/* Drag handle */}
-      <div
-        onPointerDown={() => { dragging.current = true; document.body.style.userSelect = "none"; }}
-        className="w-1 flex-shrink-0 cursor-col-resize hover:bg-brand-600/40 transition-colors"
-        style={{ marginLeft: -2, zIndex: 10 }}
-        title="Drag to resize"
-      />
+      {/* Drag handle — hidden on mobile */}
+      {!isMobile && (
+        <div
+          onPointerDown={() => { dragging.current = true; document.body.style.userSelect = "none"; }}
+          className="w-1 flex-shrink-0 cursor-col-resize hover:bg-brand-600/40 transition-colors"
+          style={{ marginLeft: -2, zIndex: 10 }}
+          title="Drag to resize"
+        />
+      )}
 
       {/* ── Right: reading pane ─────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div
+        className="flex flex-col overflow-hidden"
+        style={{
+          flex: isMobile ? "none" : 1,
+          width: isMobile ? "100%" : undefined,
+          display: showRightPanel ? "flex" : "none",
+        }}
+      >
         <ReadingNav
           selectedIdx={selectedIdx}
           total={pagedItems.length}
           onPrev={() => setSelectedIdx(i => Math.max(0, i - 1))}
           onNext={() => setSelectedIdx(i => Math.min(pagedItems.length - 1, i + 1))}
           onDeselect={() => setSelectedIdx(null)}
+          onBackToList={() => { setSelectedIdx(null); setMobileView("list"); }}
           articleId={selectedItem?.article.id}
+          isMobile={isMobile}
         />
         <div ref={readingRef} className="flex-1 overflow-y-auto">
           {selectedItem ? (

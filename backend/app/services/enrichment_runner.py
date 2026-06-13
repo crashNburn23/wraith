@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.models import Article, IOC, TTPTag, ThreatActor, ArticleActor, CVEMention, IOCWhitelist
-from app.services.enrichment_prompt import enrich_article
+from app.services.enrichment_prompt import enrich_article, PROMPT_VERSION, SCHEMA_VERSION
 from app.services.benign_domains import is_benign_domain
 from app.services.corrections import corrections_prompt_block
 from app.services import job_state, embeddings
@@ -132,6 +132,9 @@ async def enrich_one(
     article.geo_targets = result.geo_targets
     article.enrichment_status = "enriched"
     article.enriched_at = datetime.now(timezone.utc)
+    article.enrichment_model = settings.LLM_MODEL
+    article.enrichment_prompt_version = PROMPT_VERSION
+    article.enrichment_schema_version = SCHEMA_VERSION
 
     # Semantic embedding (optional, graceful no-op when disabled)
     vec = await embeddings.embed_text(f"{article.title}\n{result.summary}")
@@ -148,7 +151,12 @@ async def enrich_one(
         if not _validate_ioc(ioc.ioc_type, ioc.value):
             logger.debug("Rejected IOC [%s] %r (confidence=%s)", ioc.ioc_type, ioc.value[:60], ioc.ioc_confidence)
             continue
-        db.add(IOC(article_id=article.id, ioc_type=ioc.ioc_type, value=ioc.value))
+        db.add(IOC(
+            article_id=article.id,
+            ioc_type=ioc.ioc_type,
+            value=ioc.value,
+            source_excerpt=(ioc.source_excerpt or "")[:500] or None,
+        ))
 
     db.query(TTPTag).filter(TTPTag.article_id == article.id).delete()
     for ttp in result.ttps:
@@ -157,16 +165,25 @@ async def enrich_one(
             technique_id=ttp.technique_id,
             technique_name=ttp.technique_name,
             tactic=ttp.tactic,
+            source_excerpt=(ttp.source_excerpt or "")[:500] or None,
         ))
 
     db.query(ArticleActor).filter(ArticleActor.article_id == article.id).delete()
-    for name in result.threat_actors:
-        actor = _get_or_create_actor(db, name, actor_cache)
-        db.add(ArticleActor(article_id=article.id, actor_id=actor.id))
+    for actor_item in result.threat_actors:
+        actor = _get_or_create_actor(db, actor_item.name, actor_cache)
+        db.add(ArticleActor(
+            article_id=article.id,
+            actor_id=actor.id,
+            source_excerpt=(actor_item.source_excerpt or "")[:500] or None,
+        ))
 
     db.query(CVEMention).filter(CVEMention.article_id == article.id).delete()
-    for cve_id in result.cves:
-        db.add(CVEMention(article_id=article.id, cve_id=cve_id))
+    for cve_item in result.cves:
+        db.add(CVEMention(
+            article_id=article.id,
+            cve_id=cve_item.cve_id,
+            source_excerpt=(cve_item.source_excerpt or "")[:500] or None,
+        ))
 
     db.commit()
     return True

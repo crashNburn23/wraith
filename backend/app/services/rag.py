@@ -6,6 +6,7 @@ from sqlalchemy import or_
 from app.models import Article, IOC, CVERecord, ThreatActor
 from app.services.llm_client import get_llm_client, is_anthropic
 from app.services import embeddings
+from app.services.prompt_safety import UNTRUSTED_CONTENT_RULE, untrusted_block
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -109,7 +110,8 @@ def _build_context(articles, iocs, cves, actors) -> str:
             f"- {a['name']}" + (f" (aka {', '.join(a['aliases'])})" if a.get("aliases") else "")
             for a in actors
         ))
-    return "\n\n".join(parts) or "No relevant context found in the database."
+    context = "\n\n".join(parts) or "No relevant context found in the database."
+    return untrusted_block("retrieved_intel_context", context)
 
 
 async def stream_chat(
@@ -133,6 +135,7 @@ async def stream_chat(
     context = _build_context(articles, iocs, cves, actors)
 
     system = f"""You are a cybersecurity threat intelligence assistant.
+{UNTRUSTED_CONTENT_RULE}
 Answer questions about threats, IOCs, CVEs, and threat actors based on the intel database context below.
 Be concise and precise. Cite article titles when referencing specific intelligence.
 If the context doesn't cover the question, say so rather than hallucinating.

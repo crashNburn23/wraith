@@ -58,6 +58,7 @@ def start_scheduler(app) -> None:
             db.close()
 
     async def _enrich():
+        from app.services.alert_runner import run_alerts
         run = job_state.get_run("enrich")
         if run and run.status == "running":
             logger.info("Skipping scheduled enrichment — already running")
@@ -71,6 +72,7 @@ def start_scheduler(app) -> None:
         db = SessionLocal()
         try:
             await run_enrich_batch(db)
+            await run_alerts(db)
         finally:
             db.close()
 

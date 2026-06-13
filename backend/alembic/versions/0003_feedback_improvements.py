@@ -14,11 +14,22 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 1. Deduplicate feedback — keep the most recent row per article_id
+    # 1. Deduplicate feedback — keep the most recently updated row per article.
+    # The window-function query works on both SQLite and PostgreSQL.
     op.execute("""
         DELETE FROM feedback
-        WHERE rowid NOT IN (
-            SELECT MAX(rowid) FROM feedback GROUP BY article_id
+        WHERE id IN (
+            SELECT id
+            FROM (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY article_id
+                        ORDER BY updated_at DESC, created_at DESC, id DESC
+                    ) AS duplicate_rank
+                FROM feedback
+            ) ranked
+            WHERE duplicate_rank > 1
         )
     """)
 

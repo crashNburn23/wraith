@@ -27,6 +27,9 @@ class BulletinItemOut(BaseModel):
     user_rating: Optional[int] = None   # -1, 1, or None (unrated)
     user_reason_tags: list = []
     read_status: str = "unread"
+    cluster_id: Optional[str] = None
+    is_cluster_lead: bool = True
+    cluster_size: int = 1
     model_config = {"from_attributes": True}
 
 

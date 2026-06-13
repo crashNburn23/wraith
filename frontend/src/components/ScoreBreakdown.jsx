@@ -59,7 +59,7 @@ function FeedbackArticles({ articles }) {
   );
 }
 
-function AxisGroup({ label, color, hex, subtotal, children }) {
+function AxisGroup({ label, _color, hex, subtotal, children }) {
   return (
     <div className="rounded-lg overflow-hidden mb-2" style={{ border: `1px solid ${hex}22` }}>
       <div className="flex items-center justify-between px-3 py-1.5" style={{ background: `${hex}0D` }}>

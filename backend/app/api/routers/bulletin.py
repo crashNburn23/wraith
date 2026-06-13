@@ -46,6 +46,9 @@ def _serialize_item(
         user_rating=user_rating,
         user_reason_tags=user_reason_tags or [],
         read_status=read_status,
+        cluster_id=item.cluster_id,
+        is_cluster_lead=item.is_cluster_lead,
+        cluster_size=item.cluster_size,
     )
 
 
