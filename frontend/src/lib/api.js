@@ -113,13 +113,17 @@ export const settings = {
   suggestWeights: () => api.get("/settings/scoring/suggest").then(r => r.data),
   feedbackSignal: () => api.get("/settings/feedback-signal").then(r => r.data),
   scheduler: () => api.get("/settings/scheduler").then(r => r.data),
+  observability: () => api.get("/settings/observability").then(r => r.data),
   prune: () => api.post("/settings/prune").then(r => r.data),
   getProfile: () => api.get("/settings/profile").then(r => r.data),
   updateProfile: (body) => api.patch("/settings/profile", body).then(r => r.data),
+  compareModels: (body) => api.post("/settings/model-comparison", body).then(r => r.data),
   getWatchlist: () => api.get("/settings/watchlist").then(r => r.data),
   addWatchlist: (item_type, value) => api.post("/settings/watchlist", { item_type, value }).then(r => r.data),
   removeWatchlist: (id) => api.delete(`/settings/watchlist/${id}`).then(r => r.data),
   refreshBenignDomains: () => api.post("/settings/benign-domains/refresh").then(r => r.data),
+  listModels: () => api.get("/settings/models").then(r => r.data),
+  setModel: (model) => api.post("/settings/model", { model }).then(r => r.data),
 };
 
 export const chat = {
@@ -130,6 +134,7 @@ export const entities = {
   cve:   (cveId)   => api.get(`/entities/cve/${cveId}`).then(r => r.data),
   ioc:   (iocId)   => api.get(`/entities/ioc/${iocId}`).then(r => r.data),
   actor: (actorId) => api.get(`/entities/actor/${actorId}`).then(r => r.data),
+  graph: (params)   => api.get("/entities/graph", { params }).then(r => r.data),
 };
 
 export const searches = {

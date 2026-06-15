@@ -93,6 +93,28 @@ describe("Chat SSE streaming", () => {
     );
   });
 
+  it("renders structured citations and deterministic results", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        body: makeStream([
+          'data: {"type":"results","deterministic":{"kind":"count","value":2},"citations":[{"id":"a1","title":"Evidence article","evidence":["supporting excerpt"]}],"relationships":[]}\n\n',
+          'data: {"type":"text","text":"There are 2 matching articles."}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+      })
+    );
+
+    render(<Wrapper><Chat /></Wrapper>);
+    const textarea = screen.getByPlaceholderText(/Ask about threats/i);
+    fireEvent.change(textarea, { target: { value: "how many?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByText("There are 2 matching articles.")).toBeInTheDocument());
+    expect(screen.getByText("Evidence article")).toBeInTheDocument();
+    expect(screen.getByText("supporting excerpt")).toBeInTheDocument();
+  });
+
   it("shows error message on HTTP failure", async () => {
     global.fetch = vi.fn(() =>
       Promise.resolve({ ok: false, status: 500, body: null })

@@ -7,6 +7,7 @@ from app.models import Article, IOC, TTPTag, ThreatActor, ArticleActor, CVEMenti
 from app.services.enrichment_prompt import enrich_article, PROMPT_VERSION, SCHEMA_VERSION
 from app.services.benign_domains import is_benign_domain
 from app.services.corrections import corrections_prompt_block
+from app.services.attack_validator import filter_ttps, filter_actors
 from app.services import job_state, embeddings
 from app.core.config import settings
 
@@ -159,17 +160,31 @@ async def enrich_one(
         ))
 
     db.query(TTPTag).filter(TTPTag.article_id == article.id).delete()
-    for ttp in result.ttps:
+    # C: drop TTPs with no supporting evidence; B: drop invalid ATT&CK IDs
+    valid_ttps = [t for t in filter_ttps(result.ttps) if t.source_excerpt]
+    if len(valid_ttps) < len(result.ttps):
+        logger.debug(
+            "Filtered %d/%d TTPs for article %s (no evidence or invalid ID)",
+            len(result.ttps) - len(valid_ttps), len(result.ttps), article.id,
+        )
+    for ttp in valid_ttps:
         db.add(TTPTag(
             article_id=article.id,
             technique_id=ttp.technique_id,
             technique_name=ttp.technique_name,
             tactic=ttp.tactic,
-            source_excerpt=(ttp.source_excerpt or "")[:500] or None,
+            source_excerpt=ttp.source_excerpt[:500],
         ))
 
     db.query(ArticleActor).filter(ArticleActor.article_id == article.id).delete()
-    for actor_item in result.threat_actors:
+    # B: drop tracking IDs masquerading as actor names
+    valid_actors = filter_actors(result.threat_actors)
+    if len(valid_actors) < len(result.threat_actors):
+        logger.debug(
+            "Filtered %d/%d actors for article %s (tracking ID pattern)",
+            len(result.threat_actors) - len(valid_actors), len(result.threat_actors), article.id,
+        )
+    for actor_item in valid_actors:
         actor = _get_or_create_actor(db, actor_item.name, actor_cache)
         db.add(ArticleActor(
             article_id=article.id,
@@ -230,8 +245,12 @@ async def run_enrich_batch(db: Session) -> dict:
             ))
 
         run.processed += 1
+        # Provider usage is not consistently returned (especially by Ollama),
+        # so persist a transparent character-based estimate for run comparison.
+        run.estimated_input_tokens += max(1, len(article.title + (article.scraped_text or "")) // 4)
         if ok:
             run.succeeded += 1
+            run.estimated_output_tokens += max(1, len(article.ai_summary or "") // 4)
         else:
             run.failed += 1
             if not run.errors or run.errors[-1].article_id != article.id:

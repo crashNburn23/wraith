@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { search, cve as cveApi, enrich as enrichApi, searches as savedSearchesApi } from "../lib/api";
+import { search, cve as cveApi, enrich as enrichApi, searches as savedSearchesApi, entities as entitiesApi } from "../lib/api";
 import { Input, Select, Tabs, Spinner, Badge, SeverityBadge, Button } from "../components/ui";
 import { formatDate, timeAgo, categoryColor, severityBg } from "../lib/utils";
 import { useEntityModal } from "../components/EntityModalContext";
@@ -12,6 +12,7 @@ const TABS = [
   { id: "iocs",     label: "IOCs"     },
   { id: "cves",     label: "CVEs"     },
   { id: "actors",   label: "Actors"   },
+  { id: "graph",    label: "Graph"    },
 ];
 
 const CATEGORIES = ["", "Malware", "Ransomware", "APT", "Phishing", "Vulnerability", "Data Breach", "Supply Chain", "DDoS", "Insider Threat", "General"];
@@ -383,6 +384,175 @@ function ActorsTab() {
   );
 }
 
+// ─── Relationship graph ──────────────────────────────────────────────────────
+
+const GRAPH_COLORS = {
+  actor: "#a78bfa", cve: "#f97316", ioc: "#06b6d4",
+  ttp: "#eab308", sector: "#22c55e", source: "#64748b",
+};
+
+function GraphTab() {
+  const [days, setDays] = useState("30");
+  const [evidenceOnly, setEvidenceOnly] = useState(false);
+  const [types, setTypes] = useState(["actor", "cve", "ioc", "ttp", "sector", "source"]);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [selectedEdge, setSelectedEdge] = useState(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ["entity-graph", days, evidenceOnly, types],
+    queryFn: () => entitiesApi.graph({ days, max_articles: 40, evidence_only: evidenceOnly, types: types.join(",") }),
+    enabled: types.length > 0,
+  });
+
+  const nodes = data?.nodes || [];
+  const edges = data?.edges || [];
+  const width = 1000;
+  const height = 620;
+  const positioned = nodes.map((node) => {
+    const group = nodes.filter(n => n.type === node.type);
+    const groupIndex = group.findIndex(n => n.id === node.id);
+    const angle = (groupIndex / Math.max(group.length, 1)) * Math.PI * 2;
+    const typeIndex = Object.keys(GRAPH_COLORS).indexOf(node.type);
+    const radius = 105 + Math.max(typeIndex, 0) * 34;
+    return { ...node, x: width / 2 + Math.cos(angle) * radius, y: height / 2 + Math.sin(angle) * radius };
+  });
+  const positions = Object.fromEntries(positioned.map(n => [n.id, n]));
+  const related = selectedNode
+    ? edges.filter(e => e.source === selectedNode.id || e.target === selectedNode.id)
+    : [];
+  const highlightedEdges = new Set(related.map(edge => edge.id));
+  const highlightedNodes = new Set(
+    selectedNode
+      ? [selectedNode.id, ...related.flatMap(edge => [edge.source, edge.target])]
+      : [],
+  );
+  const clearSelection = () => {
+    setSelectedNode(null);
+    setSelectedEdge(null);
+  };
+
+  return (
+    <div className="p-5">
+      <div className="flex items-center gap-3 mb-4">
+        <Select value={days} onChange={e => setDays(e.target.value)}>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365">Last year</option>
+        </Select>
+        <label className="flex items-center gap-2 text-xs text-slate-400">
+          <input type="checkbox" checked={evidenceOnly} onChange={e => setEvidenceOnly(e.target.checked)} className="accent-brand-500" />
+          evidence-backed entities only
+        </label>
+        <span className="ml-auto text-[11px] text-slate-600 font-mono">{nodes.length} nodes · {edges.length} relations</span>
+      </div>
+      <div className="flex gap-1.5 mb-4 flex-wrap">
+        {Object.keys(GRAPH_COLORS).map(type => {
+          const active = types.includes(type);
+          return (
+            <button
+              key={type}
+              onClick={() => setTypes(current => active ? current.filter(t => t !== type) : [...current, type])}
+              className={`text-[10px] px-2 py-1 rounded border font-mono ${active ? "border-slate-500 text-slate-200 bg-navy-800" : "border-navy-border text-slate-600"}`}
+            >
+              {type}
+            </button>
+          );
+        })}
+      </div>
+      {isLoading ? <Spinner /> : nodes.length === 0 ? (
+        <p className="text-sm text-slate-500 py-16 text-center">No enriched relationships in this time window.</p>
+      ) : (
+        <div className="grid grid-cols-[1fr_240px] gap-4">
+          <div className="bg-navy-900 border border-navy-border rounded-xl overflow-auto">
+            <svg
+              viewBox={`0 0 ${width} ${height}`}
+              className="w-full min-w-[720px]"
+              aria-label="Entity relationship graph"
+              onClick={clearSelection}
+            >
+              <rect width={width} height={height} fill="transparent" />
+              {edges.map(edge => {
+                const a = positions[edge.source]; const b = positions[edge.target];
+                return a && b ? (
+                  <line
+                    key={edge.id}
+                    x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                    stroke={selectedEdge?.id === edge.id || highlightedEdges.has(edge.id) ? "#818cf8" : "#334155"}
+                    strokeWidth={Math.min(6, (highlightedEdges.has(edge.id) ? 1.8 : 0.75) + edge.weight * 0.65)}
+                    opacity={
+                      selectedEdge ? (selectedEdge.id === edge.id ? 1 : 0.18)
+                        : selectedNode ? (highlightedEdges.has(edge.id) ? 1 : 0.12)
+                          : 0.8
+                    }
+                    onClick={event => { event.stopPropagation(); setSelectedEdge(edge); setSelectedNode(null); }}
+                    className="cursor-pointer"
+                  />
+                ) : null;
+              })}
+              {positioned.map(node => (
+                <g key={node.id} transform={`translate(${node.x} ${node.y})`} onClick={event => { event.stopPropagation(); setSelectedNode(node); setSelectedEdge(null); }} className="cursor-pointer">
+                  <circle
+                    r={selectedNode?.id === node.id ? "10" : highlightedNodes.has(node.id) ? "8" : "7"}
+                    fill={GRAPH_COLORS[node.type]}
+                    stroke={selectedNode?.id === node.id ? "#e0e7ff" : highlightedNodes.has(node.id) ? "#818cf8" : "none"}
+                    strokeWidth="2"
+                    opacity={selectedNode && !highlightedNodes.has(node.id) ? 0.18 : 1}
+                  />
+                  <text
+                    x="11" y="4"
+                    fill={selectedNode && !highlightedNodes.has(node.id) ? "#475569" : "#cbd5e1"}
+                    fontSize="9"
+                  >
+                    {node.label.slice(0, 34)}
+                  </text>
+                </g>
+              ))}
+            </svg>
+          </div>
+          <div className="bg-navy-900 border border-navy-border rounded-xl p-4 text-xs">
+            {(selectedNode || selectedEdge) && (
+              <button onClick={clearSelection} className="float-right text-[10px] text-slate-600 hover:text-slate-300 font-mono">
+                clear
+              </button>
+            )}
+            {selectedEdge ? (
+              <>
+                <div className="uppercase tracking-widest font-mono text-brand-400 mb-2">Relationship</div>
+                <div className="text-slate-300 mb-1">{positions[selectedEdge.source]?.label}</div>
+                <div className="text-slate-600 mb-1">↕ co-occurs in {selectedEdge.weight} article{selectedEdge.weight !== 1 ? "s" : ""}</div>
+                <div className="text-slate-300 mb-4">{positions[selectedEdge.target]?.label}</div>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {selectedEdge.articles.map(article => (
+                    <div key={article.article_id} className="border-l border-brand-500/30 pl-2">
+                      <Link to={`/articles/${article.article_id}`} className="text-brand-400 hover:text-brand-300">{article.title}</Link>
+                      {article.evidence.map((evidence, i) => <div key={i} className="text-slate-600 mt-1 line-clamp-3">{evidence}</div>)}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : selectedNode ? (
+              <>
+                <div className="uppercase tracking-widest font-mono mb-2" style={{ color: GRAPH_COLORS[selectedNode.type] }}>{selectedNode.type}</div>
+                <div className="text-slate-200 break-all mb-3">{selectedNode.label}</div>
+                {selectedNode.detail && <div className="text-slate-500 mb-3">{selectedNode.detail}</div>}
+                <div className="mt-4 text-[10px] uppercase tracking-widest text-slate-600 mb-2">Relations</div>
+                <div className="space-y-2 max-h-80 overflow-y-auto">
+                  {related.map(edge => (
+                    <button key={edge.id} onClick={() => { setSelectedEdge(edge); setSelectedNode(null); }} className="block w-full text-left border-l border-navy-border pl-2 hover:border-brand-500/40">
+                      <div className="text-slate-400">{positions[edge.source === selectedNode.id ? edge.target : edge.source]?.label}</div>
+                      <div className="text-slate-600 font-mono mt-0.5">{edge.weight} supporting article{edge.weight !== 1 ? "s" : ""}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : <p className="text-slate-600">Select a node or edge to inspect direct entity relationships and supporting articles.</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function IntelHub() {
@@ -398,6 +568,7 @@ export default function IntelHub() {
         {tab === "iocs"     && <IOCsTab />}
         {tab === "cves"     && <CVEsTab />}
         {tab === "actors"   && <ActorsTab />}
+        {tab === "graph"    && <GraphTab />}
       </div>
     </div>
   );

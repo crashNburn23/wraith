@@ -35,7 +35,7 @@ class SourceResult:
 @dataclass
 class JobRun:
     job_type: str        # "ingest" | "enrich"
-    status: str          # "running" | "paused" | "stopped" | "completed" | "error" | "interrupted"
+    status: str          # "running" | "paused" | "stopped" | "completed" | "partial" | "error" | "interrupted"
     id: str = field(default_factory=new_uuid)
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: Optional[datetime] = None
@@ -47,6 +47,8 @@ class JobRun:
     failed: int = 0
     current_title: Optional[str] = None   # article being processed right now
     errors: list[ArticleError] = field(default_factory=list)
+    estimated_input_tokens: int = 0
+    estimated_output_tokens: int = 0
 
     # Ingest-specific
     source_results: list[SourceResult] = field(default_factory=list)
@@ -67,14 +69,16 @@ class JobRun:
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "elapsed_seconds": self.elapsed_seconds(),
+            "total": self.total,
+            "processed": self.processed,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
         }
         if self.job_type == "enrich":
             d.update({
-                "total": self.total,
-                "processed": self.processed,
-                "succeeded": self.succeeded,
-                "failed": self.failed,
                 "current_title": self.current_title,
+                "estimated_input_tokens": self.estimated_input_tokens,
+                "estimated_output_tokens": self.estimated_output_tokens,
                 "errors": [
                     {"article_id": e.article_id, "title": e.title, "error": e.error}
                     for e in self.errors[-20:]   # last 20 errors max
@@ -142,6 +146,8 @@ def _load_latest(job_type: str) -> Optional[JobRun]:
         run.processed = p.get("processed", 0)
         run.succeeded = p.get("succeeded", 0)
         run.failed = p.get("failed", 0)
+        run.estimated_input_tokens = p.get("estimated_input_tokens", 0)
+        run.estimated_output_tokens = p.get("estimated_output_tokens", 0)
         run.current_title = None
         run.errors = [ArticleError(**e) for e in p.get("errors", [])]
         run.source_results = [SourceResult(**r) for r in p.get("source_results", [])]

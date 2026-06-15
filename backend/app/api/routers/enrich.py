@@ -116,7 +116,8 @@ async def resume_enrichment(background_tasks: BackgroundTasks):
 @router.get("/prompt")
 def get_enrichment_prompt():
     from app.services.enrichment_prompt import SYSTEM_PROMPT
-    return {"prompt": SYSTEM_PROMPT}
+    from app.core.config import settings
+    return {"prompt": SYSTEM_PROMPT, "model": settings.LLM_MODEL, "provider": settings.LLM_PROVIDER}
 
 
 @router.post("/articles/{article_id}")

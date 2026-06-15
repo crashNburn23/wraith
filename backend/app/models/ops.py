@@ -9,7 +9,7 @@ class JobRunRecord(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     job_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # ingest | enrich
-    status: Mapped[str] = mapped_column(String(20), nullable=False)  # running | paused | stopped | completed | error | interrupted
+    status: Mapped[str] = mapped_column(String(20), nullable=False)  # running | paused | stopped | completed | partial | error | interrupted
     started_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # full run snapshot (to_dict)

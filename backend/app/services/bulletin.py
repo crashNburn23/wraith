@@ -71,8 +71,9 @@ def build_bulletin(db: Session, for_date: date | None = None, include_all: bool 
     db.commit()
     db.refresh(bulletin)
 
-    from app.services.clustering import cluster_bulletin_items
+    from app.services.clustering import cluster_bulletin_items, confirm_story_clusters_sync
     cluster_bulletin_items(db, bulletin)
+    confirm_story_clusters_sync(bulletin)
     db.commit()
 
     logger.info(

@@ -1,5 +1,6 @@
 from app.services.dedup import normalise_url, url_hash
-from app.services.ingest_runner import _title_tokens, _is_title_dup
+from app.services.ingest_runner import _title_tokens, _is_title_dup, _final_ingest_status
+from app.services.job_state import JobRun
 
 
 class TestUrlNormalisation:
@@ -37,3 +38,12 @@ class TestTitleDedup:
     def test_short_titles_never_dup(self):
         a = _title_tokens("Patch now")
         assert not _is_title_dup(a, [a])
+
+
+class TestIngestStatus:
+    def test_completed_without_source_failures(self):
+        assert _final_ingest_status(JobRun(job_type="ingest", status="running")) == "completed"
+
+    def test_partial_with_source_failures(self):
+        run = JobRun(job_type="ingest", status="running", failed=3)
+        assert _final_ingest_status(run) == "partial"

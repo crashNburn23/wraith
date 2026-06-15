@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Bulletin
     BULLETIN_MAX_ITEMS: int = 30
+    LLM_CONFIRM_STORY_CLUSTERS: bool = True
 
     # Optional webhook (ntfy-style: plain-text POST) — the daily brief is pushed
     # here after the scheduled bulletin build. Empty disables.

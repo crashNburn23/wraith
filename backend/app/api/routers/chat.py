@@ -1,8 +1,9 @@
 import json
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from typing import Literal
 from app.api.deps import get_db
 from app.services.rag import stream_chat
 from app.core.config import settings
@@ -10,15 +11,20 @@ from app.core.config import settings
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=20_000)
+
+
 class ChatRequest(BaseModel):
-    messages: list[dict]  # [{role: "user"|"assistant", content: "..."}]
+    messages: list[ChatMessage] = Field(min_length=1, max_length=100)
 
 
 @router.post("")
 async def chat(body: ChatRequest, db: Session = Depends(get_db)):
     async def event_stream():
-        async for chunk in stream_chat(db, body.messages):
-            yield f"data: {json.dumps({'text': chunk})}\n\n"
+        async for event in stream_chat(db, [message.model_dump() for message in body.messages]):
+            yield f"data: {json.dumps(event)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

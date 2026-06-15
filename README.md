@@ -14,7 +14,7 @@ No cloud required. Runs entirely on localhost against a local Ollama model.
 
 ## What it does
 
-- **Daily Bulletin** — new articles ranked by a combined threat severity + personal relevance score, in a two-pane reader with the AI daily brief. Only genuinely new articles each day (capped at `BULLETIN_MAX_ITEMS`).
+- **Daily Bulletin** — new articles ranked by a combined threat severity + personal relevance score, in a two-pane reader with the AI daily brief. Only genuinely new articles each day (capped at `BULLETIN_MAX_ITEMS`), with LLM confirmation of multi-article story clusters.
 - **Feedback loop** — 👍/👎, dismissals, and even just *opening* an article feed back into tomorrow's ranking. Reason tags let you be specific about why something was irrelevant.
 - **Triage mode** — press `t` for a full-screen, one-key-per-article review flow with auto-advance and end-of-session stats.
 - **Learning enrichment** — analyst corrections (deleted IOCs, whitelisted domains, edited entities) are fed back into the enrichment prompt as do-not-repeat examples.
@@ -22,7 +22,7 @@ No cloud required. Runs entirely on localhost against a local Ollama model.
 - **Suggested weights** — one click analyzes your rating history and proposes scoring weights that match what you actually read.
 - **LLM Enrichment** — summary, threat category, severity, sector targets, IOCs, MITRE TTPs, threat actors, CVE mentions; optional semantic embeddings for similarity scoring and chat retrieval.
 - **Intel Hub** — search across articles, IOCs, CVEs (with plain-English AI summaries), and actors.
-- **RAG Chat** — ask questions against your intel database; semantic retrieval when embeddings are enabled, with markdown rendering.
+- **Analyst Query Chat** — deterministic counts and timelines, relationship-aware retrieval, clickable article citations, evidence excerpts, and semantic RAG synthesis when embeddings are enabled.
 - **Command palette & keyboard-first UI** — `Ctrl+K` palette, `g`-chords for page navigation, full one-handed bulletin triage (`?` shows the cheat sheet).
 - **Score breakdown** — click any score bubble to see exactly how it was computed, including which past ratings drove it.
 - **Investigations** — create named workspaces, add articles, and attach freeform notes to track an active incident or research thread. Open with `g n` or the sidebar icon.
@@ -91,6 +91,7 @@ NVD_API_KEY=
 
 ENRICH_DELAY_SECONDS=0
 BULLETIN_MAX_ITEMS=30
+LLM_CONFIRM_STORY_CLUSTERS=true
 
 # Optional: push the daily brief to an ntfy-style webhook each morning
 # BRIEF_WEBHOOK_URL=https://ntfy.sh/your-topic

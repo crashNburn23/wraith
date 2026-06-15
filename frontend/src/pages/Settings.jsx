@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { sources as sourcesApi, ingest, enrich as enrichApi, bulletin as bulletinApi, settings as settingsApi, cve, feedback as feedbackApi, searches as savedSearchesApi } from "../lib/api";
-import { Button, Input, Card, Spinner, Divider } from "../components/ui";
+import { Button, Input, Select, Card, Spinner, Divider } from "../components/ui";
 
 function TagInput({ tags, onChange, placeholder, color = "bg-navy-800 border-navy-border text-slate-300" }) {
   const [input, setInput] = useState("");
@@ -36,7 +36,7 @@ function TagInput({ tags, onChange, placeholder, color = "bg-navy-800 border-nav
   );
 }
 
-function CollapsibleCard({ title, subtitle, defaultOpen = false, actions, children }) {
+function CollapsibleCard({ title, subtitle, defaultOpen = true, actions, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <Card className="p-5">
@@ -60,7 +60,7 @@ function CollapsibleCard({ title, subtitle, defaultOpen = false, actions, childr
 
 // ─── Ingest Tracker ──────────────────────────────────────────────────────────
 
-function IngestTracker() {
+function IngestTracker({ compact = false }) {
   const qc = useQueryClient();
 
   const { data } = useQuery({
@@ -88,10 +88,33 @@ function IngestTracker() {
   const run = data?.current_run;
   const articles = data?.articles;
 
+  if (compact) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <RunStatusBadge status={run?.status || "idle"} />
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => runMut.mutate()}
+            disabled={runMut.isPending || run?.status === "running"}
+          >
+            {run?.status === "running" ? <><Spinner size="sm" /> Running…</> : "Run"}
+          </Button>
+        </div>
+        <div className="flex gap-3 text-[10px] font-mono text-slate-600">
+          <span><span className="text-slate-300">{articles?.total ?? "—"}</span> total</span>
+          <span><span className="text-yellow-400">{articles?.pending ?? "—"}</span> pending</span>
+          <span><span className="text-red-400">{articles?.error ?? "—"}</span> errors</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-slate-300">Ingest</h3>
+      <div className={`flex items-center mb-3 ${compact ? "justify-end" : "justify-between"}`}>
+        {!compact && <h3 className="text-sm font-semibold text-slate-300">Ingest</h3>}
         <Button
           size="sm"
           variant="secondary"
@@ -141,7 +164,7 @@ function IngestTracker() {
             <span className="text-slate-500">{run.elapsed_seconds}s elapsed</span>
             <span className="text-slate-600 ml-auto">{new Date(run.started_at).toLocaleTimeString()}</span>
           </div>
-          {run.source_results?.length > 0 && (
+          {!compact && run.source_results?.length > 0 && (
             <div className="space-y-1 max-h-48 overflow-y-auto">
               {run.source_results.map((s, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -166,7 +189,7 @@ function IngestTracker() {
 
 // ─── Enrich Tracker ──────────────────────────────────────────────────────────
 
-function EnrichTracker() {
+function EnrichTracker({ compact = false }) {
   const qc = useQueryClient();
 
   const { data } = useQuery({
@@ -210,10 +233,37 @@ function EnrichTracker() {
   const _isStopped = run?.status === "stopped";
   const pct = run?.total > 0 ? Math.round((run.processed / run.total) * 100) : 0;
 
+  if (compact) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <RunStatusBadge status={run?.status || (isPaused ? "paused" : "idle")} />
+          {isRunning ? (
+            <Button size="sm" variant="secondary" onClick={() => pauseMut.mutate()} disabled={pauseMut.isPending}>Pause</Button>
+          ) : isPaused ? (
+            <Button size="sm" variant="success" onClick={() => resumeMut.mutate()} disabled={resumeMut.isPending}>Resume</Button>
+          ) : (
+            <Button size="sm" variant="secondary" onClick={() => runMut.mutate()} disabled={runMut.isPending}>Run</Button>
+          )}
+        </div>
+        <div className="flex gap-3 text-[10px] font-mono text-slate-600">
+          <span><span className="text-yellow-400">{data?.pending_articles ?? "—"}</span> pending</span>
+          <span><span className="text-green-400">{data?.enriched_articles ?? "—"}</span> done</span>
+          <span><span className="text-red-400">{data?.error_articles ?? "—"}</span> errors</span>
+        </div>
+        {isRunning && run?.total > 0 && (
+          <div className="bg-navy-700 rounded-full h-1 overflow-hidden">
+            <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-slate-300">Enrich</h3>
+      <div className={`flex items-center mb-3 ${compact ? "justify-end" : "justify-between"}`}>
+        {!compact && <h3 className="text-sm font-semibold text-slate-300">Enrich</h3>}
         <div className="flex gap-1.5">
           {isRunning ? (
             <>
@@ -286,7 +336,7 @@ function EnrichTracker() {
           )}
 
           {/* Currently processing */}
-          {run.current_title && (
+          {!compact && run.current_title && (
             <div className="flex items-center gap-1.5 text-slate-400">
               <Spinner size="sm" />
               <span className="truncate">{run.current_title}</span>
@@ -300,7 +350,7 @@ function EnrichTracker() {
           </div>
 
           {/* Error list */}
-          {run.errors?.length > 0 && (
+          {!compact && run.errors?.length > 0 && (
             <details>
               <summary className="text-red-400 cursor-pointer select-none">
                 {run.errors.length} error{run.errors.length !== 1 ? "s" : ""}
@@ -342,6 +392,7 @@ function RunStatusBadge({ status }) {
     paused:    "bg-yellow-900/50 text-yellow-300",
     stopped:   "bg-orange-900/50 text-orange-300",
     completed: "bg-green-900/50 text-green-300",
+    partial:   "bg-amber-900/50 text-amber-300",
     error:     "bg-red-900/50 text-red-300",
     idle:      "bg-navy-800 text-slate-400",
   };
@@ -426,46 +477,175 @@ function SchedulerSection() {
 
 // ─── Controls Card (ingest + enrich + other buttons) ─────────────────────────
 
+function PipelineStage({ number, title, description, children, accent, last = false }) {
+  return (
+    <div className="relative min-w-0">
+      {!last && (
+        <div className="hidden lg:block absolute top-5 -right-5 z-10 text-brand-400/50" aria-hidden="true">
+          <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+            <path d="M2 8h11m-4-4 4 4-4 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      )}
+      <div
+        className="h-full rounded-lg border border-navy-border bg-navy-900/60 px-3.5 py-3"
+        style={{ borderLeftColor: accent }}
+      >
+        <div className="flex items-center gap-2 mb-0.5">
+          <span
+            className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-mono font-bold"
+            style={{ color: accent, background: `${accent}18`, border: `1px solid ${accent}55` }}
+          >
+            {number}
+          </span>
+          <h3 className="text-xs font-semibold text-white">{title}</h3>
+        </div>
+        <p className="text-[10px] text-slate-600 mb-3 pl-7 truncate">{description}</p>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function ControlsSection() {
   const qc = useQueryClient();
   const bulletinMut = useMutation({ mutationFn: bulletinApi.build, onSuccess: () => qc.invalidateQueries({ queryKey: ["bulletin-today"] }) });
   const cveSyncMut = useMutation({ mutationFn: cve.sync });
 
   return (
-    <Card className="p-5 space-y-5">
-      <h2 className="text-base font-semibold text-white">Pipeline</h2>
-
-      <IngestTracker />
-      <Divider />
-      <EnrichTracker />
-      <Divider />
-
-      {/* CVE Sync */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-slate-300">Sync CVEs</h3>
-          <Button variant="secondary" size="sm" onClick={() => cveSyncMut.mutate()} disabled={cveSyncMut.isPending}>
-            {cveSyncMut.isPending ? <><Spinner size="sm" /> Syncing…</> : "Run Now"}
-          </Button>
-        </div>
-        {cveSyncMut.isSuccess && <p className="text-xs text-green-400 font-mono">CVE sync complete</p>}
-        {cveSyncMut.isError && <p className="text-xs text-red-400 font-mono">Sync failed</p>}
+    <Card className="p-4">
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <h2 className="text-sm font-semibold text-white">Pipeline</h2>
+        <p className="text-[10px] text-slate-600 font-mono">collect → enrich → sync → publish</p>
       </div>
 
-      <Divider />
-
-      {/* Build Bulletin */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-slate-300">Build Bulletin</h3>
-          <Button variant="secondary" size="sm" onClick={() => bulletinMut.mutate()} disabled={bulletinMut.isPending}>
-            {bulletinMut.isPending ? <><Spinner size="sm" /> Building…</> : "Run Now"}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
+        <PipelineStage number="01" title="Ingest" description="Collect articles from configured sources" accent="#0088A8">
+          <IngestTracker compact />
+        </PipelineStage>
+        <PipelineStage number="02" title="Enrich" description="Extract entities and score intelligence" accent="#5558D4">
+          <EnrichTracker compact />
+        </PipelineStage>
+        <PipelineStage number="03" title="CVE Sync" description="Refresh vulnerability intelligence" accent="#B85018">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-mono text-slate-600">NVD data</span>
+          <Button variant="secondary" size="sm" onClick={() => cveSyncMut.mutate()} disabled={cveSyncMut.isPending}>
+            {cveSyncMut.isPending ? <><Spinner size="sm" /> Syncing…</> : "Run"}
           </Button>
-        </div>
-        {bulletinMut.isSuccess && <p className="text-xs text-green-400 font-mono">Bulletin built</p>}
-        {bulletinMut.isError && <p className="text-xs text-red-400 font-mono">Build failed</p>}
+          </div>
+          {cveSyncMut.isSuccess && <p className="text-xs text-green-400 font-mono mt-3">CVE sync complete</p>}
+          {cveSyncMut.isError && <p className="text-xs text-red-400 font-mono mt-3">Sync failed</p>}
+        </PipelineStage>
+        <PipelineStage number="04" title="Bulletin" description="Publish the latest prioritized brief" accent="#7722AA" last>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-mono text-slate-600">Daily brief</span>
+          <Button variant="secondary" size="sm" onClick={() => bulletinMut.mutate()} disabled={bulletinMut.isPending}>
+            {bulletinMut.isPending ? <><Spinner size="sm" /> Building…</> : "Run"}
+          </Button>
+          </div>
+          {bulletinMut.isSuccess && <p className="text-xs text-green-400 font-mono mt-3">Bulletin built</p>}
+          {bulletinMut.isError && <p className="text-xs text-red-400 font-mono mt-3">Build failed</p>}
+        </PipelineStage>
       </div>
     </Card>
+  );
+}
+
+// ─── Pipeline Observability ──────────────────────────────────────────────────
+
+function PipelineObservabilitySection() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["pipeline-observability"],
+    queryFn: settingsApi.observability,
+    refetchInterval: 15_000,
+  });
+
+  const queue = data?.queue || {};
+  const summaries = Object.entries(data?.summary || {});
+
+  return (
+    <CollapsibleCard
+      title="Pipeline Observability"
+      subtitle="Queue depth, recent durations, failures, and retry history"
+    >
+      {isLoading ? <Spinner /> : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              ["Pending", queue.enrichment_pending, "text-yellow-400"],
+              ["Enrichment errors", queue.enrichment_errors, "text-red-400"],
+              ["Failing sources", queue.sources_failing, "text-orange-400"],
+            ].map(([label, value, color]) => (
+              <div key={label} className="bg-navy-900 border border-navy-border rounded-lg p-3">
+                <div className={`text-xl font-mono font-bold ${color}`}>{value ?? 0}</div>
+                <div className="text-[10px] uppercase tracking-wider text-slate-600 mt-1">{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {summaries.length > 0 && (
+            <div className="grid grid-cols-2 gap-2">
+              {summaries.map(([job, stats]) => (
+                <div key={job} className="bg-navy-900/80 rounded-lg p-3 text-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-slate-300 capitalize">{job}</span>
+                    <span className="font-mono text-slate-500">{Math.round((stats.success_rate || 0) * 100)}% successful</span>
+                  </div>
+                  <div className="flex gap-3 text-[11px] text-slate-500 font-mono">
+                    <span>{stats.runs} runs</span>
+                    <span>{stats.avg_duration_seconds ?? "—"}s avg</span>
+                    <span className={stats.failed_items ? "text-red-400" : ""}>{stats.failed_items} failed items</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-600 mb-2">Recent runs</div>
+            <div className="space-y-1 max-h-52 overflow-y-auto">
+              {(data?.recent_runs || []).length === 0 ? (
+                <p className="text-xs text-slate-600">No persisted pipeline runs yet.</p>
+              ) : data.recent_runs.map(run => (
+                <div key={run.id} className="flex items-center gap-2 bg-navy-900/60 rounded px-2.5 py-2 text-xs">
+                  <RunStatusBadge status={run.status} />
+                  <span className="text-slate-300 capitalize w-12">{run.job_type}</span>
+                  <span className="text-slate-600 font-mono">{new Date(run.started_at).toLocaleString()}</span>
+                  <span className="ml-auto text-slate-500 font-mono">{run.elapsed_seconds ?? "—"}s</span>
+                  <span className="text-green-400 font-mono">{run.succeeded} ok</span>
+                  {run.failed > 0 && <span className="text-red-400 font-mono">{run.failed} failed</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {(data?.dead_letter || []).length > 0 && (
+            <details>
+              <summary className="text-xs text-red-400 cursor-pointer">
+                Failure history ({data.dead_letter.length})
+              </summary>
+              <div className="space-y-1 mt-2 max-h-44 overflow-y-auto">
+                {data.dead_letter.map((item, i) => (
+                  <div key={`${item.run_id}-${i}`} className="bg-red-900/10 border border-red-500/10 rounded px-2.5 py-2 text-[11px]">
+                    <div className="text-slate-300">{item.title}</div>
+                    <div className="text-red-400/70 font-mono break-all mt-0.5">{item.error}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+
+          <div className="text-[10px] text-slate-600 font-mono">
+            {data?.model_usage?.available && (
+              <span className="text-slate-500 mr-2">
+                Recent estimated tokens: {data.model_usage.estimated_total_tokens.toLocaleString()}
+              </span>
+            )}
+            {data?.model_usage?.note}
+          </div>
+        </div>
+      )}
+    </CollapsibleCard>
   );
 }
 
@@ -505,6 +685,145 @@ function SystemPromptSection() {
             To customise, edit <code className="text-slate-400">backend/app/services/enrichment_prompt.py</code> and restart the API.
           </p>
         </>
+      )}
+    </CollapsibleCard>
+  );
+}
+
+// ─── Model Comparison ────────────────────────────────────────────────────────
+
+const COMPARISON_METRICS = [
+  ["quality_score", "Overall quality", true],
+  ["category_accuracy", "Category accuracy", true],
+  ["actor_f1", "Actor F1", true],
+  ["cve_f1", "CVE F1", true],
+  ["ttp_f1", "TTP F1", true],
+  ["ioc_f1", "IOC F1", true],
+  ["sector_f1", "Sector F1", true],
+  ["severity_delta", "Severity delta", false],
+];
+
+function ModelSelect({ label, value, onChange, exclude, isOllama, models, onReset }) {
+  return (
+    <div>
+      <label className="block text-[10px] uppercase tracking-widest text-slate-600 mb-1">{label}</label>
+      {isOllama && models.length > 0 ? (
+        <select
+          value={value}
+          onChange={e => { onChange(e.target.value); onReset(); }}
+          className="w-full bg-navy-900 border border-navy-border rounded-lg px-2 py-1.5 text-sm text-slate-100 font-mono focus:outline-none focus:border-brand-500/50"
+        >
+          <option value="">— select model —</option>
+          {models.map(m => (
+            <option key={m} value={m} disabled={m === exclude}>{m}</option>
+          ))}
+        </select>
+      ) : (
+        <Input value={value} onChange={e => { onChange(e.target.value); onReset(); }} placeholder="model name" className="w-full font-mono" />
+      )}
+    </div>
+  );
+}
+
+function ModelComparisonSection() {
+  const qc = useQueryClient();
+  const promptQuery = useQuery({ queryKey: ["enrich-prompt"], queryFn: enrichApi.prompt });
+  const modelsQuery = useQuery({ queryKey: ["local-models"], queryFn: settingsApi.listModels, staleTime: 60_000 });
+  const [modelA, setModelA] = useState("");
+  const [modelB, setModelB] = useState("");
+  const [sampleSize, setSampleSize] = useState("3");
+  const [activeModel, setActiveModel] = useState(null);
+
+  useEffect(() => {
+    if (promptQuery.data?.model) {
+      setActiveModel(promptQuery.data.model);
+      if (!modelA) setModelA(promptQuery.data.model);
+    }
+  }, [promptQuery.data, modelA]);
+
+  const models = modelsQuery.data?.models || [];
+  const isOllama = !modelsQuery.data || modelsQuery.data.provider === "ollama";
+
+  const compare = useMutation({
+    mutationFn: () => settingsApi.compareModels({
+      model_a: modelA.trim(),
+      model_b: modelB.trim(),
+      sample_size: Number(sampleSize),
+    }),
+  });
+
+  const setModel = useMutation({
+    mutationFn: (model) => settingsApi.setModel(model),
+    onSuccess: (data) => {
+      setActiveModel(data.model);
+      qc.invalidateQueries({ queryKey: ["enrich-prompt"] });
+      qc.invalidateQueries({ queryKey: ["local-models"] });
+    },
+  });
+
+  return (
+    <CollapsibleCard
+      title="Model Comparison"
+      subtitle="Run two model candidates against the same bounded enrichment sample"
+    >
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <ModelSelect label="Model A" value={modelA} onChange={setModelA} exclude={modelB} isOllama={isOllama} models={models} onReset={compare.reset} />
+        <ModelSelect label="Model B" value={modelB} onChange={setModelB} exclude={modelA} isOllama={isOllama} models={models} onReset={compare.reset} />
+      </div>
+      <div className="flex items-center gap-3">
+        <Select value={sampleSize} onChange={e => { setSampleSize(e.target.value); compare.reset(); }}>
+          {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n} article{n !== 1 ? "s" : ""}</option>)}
+        </Select>
+        <Button onClick={() => compare.mutate()} disabled={compare.isPending || !modelA.trim() || !modelB.trim() || modelA.trim() === modelB.trim()}>
+          {compare.isPending ? <><Spinner size="sm" /> Comparing…</> : "Run comparison"}
+        </Button>
+        <span className="text-[10px] text-slate-600 font-mono">read-only · up to 10 LLM calls</span>
+      </div>
+
+      {compare.isError && (
+        <p className="text-xs text-red-400 mt-3">{compare.error?.response?.data?.detail || "Comparison failed"}</p>
+      )}
+      {compare.data && (
+        <div className="mt-4 space-y-3">
+          <div className={`text-[11px] rounded px-3 py-2 border ${compare.data.gold_set ? "text-green-400/80 bg-green-900/10 border-green-500/10" : "text-amber-400/80 bg-amber-900/10 border-amber-500/10"}`}>
+            Baseline: {compare.data.baseline}.
+            {!compare.data.gold_set && " Populate a reviewed gold set before using this result for production model selection."}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {compare.data.candidates.map(candidate => (
+              <div key={candidate.model} className={`rounded-lg border p-3 ${compare.data.winner === candidate.model ? "border-green-500/30 bg-green-900/10" : "border-navy-border bg-navy-900"}`}>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <span className="text-xs text-slate-200 font-mono truncate" title={candidate.model}>{candidate.model}</span>
+                  {compare.data.winner === candidate.model && <span className="text-[9px] uppercase tracking-widest text-green-400">higher score</span>}
+                </div>
+                <div className="space-y-1.5">
+                  {COMPARISON_METRICS.map(([key, label, higherBetter]) => (
+                    <div key={key} className="flex justify-between text-[11px] font-mono">
+                      <span className="text-slate-600">{label}</span>
+                      <span className={higherBetter ? "text-slate-300" : "text-slate-400"}>
+                        {candidate.metrics[key] == null ? "—" : key === "severity_delta" ? candidate.metrics[key].toFixed(1) : `${Math.round(candidate.metrics[key] * 100)}%`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-[10px] text-slate-600 font-mono">{candidate.scored}/{compare.data.sample_size} scored · {candidate.errors.length} errors</span>
+                  {activeModel === candidate.model ? (
+                    <span className="text-[10px] font-mono text-emerald-400">● active</span>
+                  ) : (
+                    <button
+                      onClick={() => setModel.mutate(candidate.model)}
+                      disabled={setModel.isPending}
+                      className="text-[10px] font-mono text-slate-500 hover:text-brand-400 border border-slate-700 hover:border-brand-500/50 rounded px-2 py-0.5 transition-colors disabled:opacity-40"
+                    >
+                      {setModel.isPending && setModel.variables === candidate.model ? "Setting…" : "Set as current model"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </CollapsibleCard>
   );
@@ -1200,21 +1519,119 @@ function SavedSearchesSection() {
   );
 }
 
-export default function Settings() {
+const SETTINGS_SECTIONS = [
+  { id: "observability", title: "Pipeline Observability", description: "Queue health, recent runs, and failures", group: "Operations", Component: PipelineObservabilitySection },
+  { id: "scheduler", title: "Scheduler", description: "Automated pipeline run times", group: "Operations", Component: SchedulerSection },
+  { id: "storage", title: "Storage & Retention", description: "Pruning and data lifecycle controls", group: "Operations", Component: StorageSection },
+  { id: "profile", title: "Interest Profile", description: "Topics, sectors, and regions you track", group: "Intelligence", Component: ProfileSection },
+  { id: "watchlist", title: "Watchlist", description: "Priority actors, CVEs, and entities", group: "Intelligence", Component: WatchlistSection },
+  { id: "saved-searches", title: "Saved Searches", description: "Search alerts and saved filters", group: "Intelligence", Component: SavedSearchesSection },
+  { id: "feedback", title: "Feedback Signal", description: "Natural-language relevance guidance", group: "Intelligence", Component: NaturalLanguageFeedbackSection },
+  { id: "scoring", title: "Scoring", description: "Tune ranking weights and thresholds", group: "Models & Quality", Component: ScoringSection },
+  { id: "model-comparison", title: "Model Comparison", description: "Evaluate enrichment model candidates", group: "Models & Quality", Component: ModelComparisonSection },
+  { id: "system-prompt", title: "System Prompt", description: "Inspect the active enrichment prompt", group: "Models & Quality", Component: SystemPromptSection },
+  { id: "data-quality", title: "Data Quality", description: "Manage benign domains and filtering", group: "Sources & Data", Component: DataQualitySection },
+  { id: "sources", title: "Sources", description: "Configure intelligence feeds", group: "Sources & Data", Component: SourcesSection },
+];
+
+function SettingsDirectory({ activeSection, onSelect }) {
+  const groups = [...new Set(SETTINGS_SECTIONS.map(section => section.group))];
+
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-      <h1 className="text-xl font-bold text-white">Settings</h1>
+    <>
+      <Select
+        value={activeSection.id}
+        onChange={event => onSelect(SETTINGS_SECTIONS.find(section => section.id === event.target.value))}
+        className="w-full lg:hidden"
+      >
+        {groups.map(group => (
+          <optgroup key={group} label={group}>
+            {SETTINGS_SECTIONS.filter(section => section.group === group).map(section => (
+              <option key={section.id} value={section.id}>{section.title}</option>
+            ))}
+          </optgroup>
+        ))}
+      </Select>
+      <Card className="hidden lg:block overflow-hidden lg:sticky lg:top-4">
+        <div className="px-3.5 py-3 border-b border-navy-border">
+          <h2 className="text-xs font-semibold text-white">Configuration</h2>
+        </div>
+        <div className="p-1.5">
+          {groups.map(group => (
+            <div key={group} className="mb-2 last:mb-0">
+              <div className="px-2 py-1.5 text-[9px] font-mono font-semibold uppercase tracking-[0.18em] text-slate-600">
+                {group}
+              </div>
+              {SETTINGS_SECTIONS.filter(section => section.group === group).map(section => (
+                <button
+                  key={section.id}
+                  onClick={() => onSelect(section)}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left group transition-colors ${
+                    activeSection.id === section.id
+                      ? "bg-brand-600/10 text-white"
+                      : "hover:bg-navy-700/70 text-slate-300"
+                  }`}
+                >
+                  <span className={`w-1 h-1 rounded-full transition-colors flex-shrink-0 ${
+                    activeSection.id === section.id ? "bg-brand-400" : "bg-slate-700 group-hover:bg-slate-500"
+                  }`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[11px] font-medium group-hover:text-white">{section.title}</span>
+                  </span>
+                  {activeSection.id === section.id && <span className="text-brand-400 text-xs">›</span>}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </>
+  );
+}
+
+export default function Settings() {
+  const [activeSection, setActiveSection] = useState(() => {
+    const id = window.location.hash.slice(1);
+    return SETTINGS_SECTIONS.find(item => item.id === id) || SETTINGS_SECTIONS[0];
+  });
+
+  useEffect(() => {
+    const openHashSection = () => {
+      const id = window.location.hash.slice(1);
+      const section = SETTINGS_SECTIONS.find(item => item.id === id);
+      if (section) setActiveSection(section);
+    };
+    openHashSection();
+    window.addEventListener("hashchange", openHashSection);
+    return () => window.removeEventListener("hashchange", openHashSection);
+  }, []);
+
+  const selectSection = (section) => {
+    setActiveSection(section);
+    window.history.replaceState(null, "", `#${section.id}`);
+  };
+
+  const ActiveComponent = activeSection.Component;
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-5 space-y-4">
+      <div className="flex items-baseline justify-between gap-4">
+        <h1 className="text-lg font-bold text-white">Settings</h1>
+        <p className="hidden sm:block text-[10px] font-mono text-slate-600">pipeline controls & configuration</p>
+      </div>
       <ControlsSection />
-      <ProfileSection />
-      <WatchlistSection />
-      <SavedSearchesSection />
-      <NaturalLanguageFeedbackSection />
-      <ScoringSection />
-      <SystemPromptSection />
-      <SourcesSection />
-      <DataQualitySection />
-      <StorageSection />
-      <SchedulerSection />
+      <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-4 items-start">
+        <SettingsDirectory activeSection={activeSection} onSelect={selectSection} />
+        <div className="min-w-0">
+          <div className="flex items-end justify-between gap-4 px-1 mb-2.5">
+            <div>
+              <div className="text-[9px] font-mono uppercase tracking-[0.18em] text-brand-400">{activeSection.group}</div>
+              <p className="text-[11px] text-slate-600 mt-0.5">{activeSection.description}</p>
+            </div>
+          </div>
+          <ActiveComponent />
+        </div>
+      </div>
     </div>
   );
 }

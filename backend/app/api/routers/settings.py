@@ -1,4 +1,6 @@
+import json
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -6,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app.models import (
     ScoringConfig, Feedback, ReadStatus, Article, UserProfile,
-    BulletinItem, WatchlistItem,
+    BulletinItem, WatchlistItem, JobRunRecord, Source,
 )
 from app.schemas.scoring import ScoringConfigOut, ScoringConfigUpdate
 from app.services.scoring import _get_config, _get_profile
@@ -205,6 +207,110 @@ def scheduler_status():
     }
 
 
+@router.get("/observability")
+def pipeline_observability(db: Session = Depends(get_db)):
+    """Recent pipeline health derived from persisted run snapshots."""
+    rows = (
+        db.query(JobRunRecord)
+        .order_by(JobRunRecord.started_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    runs = []
+    dead_letter = []
+    by_job = {}
+    estimated_input_tokens = 0
+    estimated_output_tokens = 0
+    for row in rows:
+        payload = row.payload or {}
+        elapsed = payload.get("elapsed_seconds")
+        if elapsed is None and row.finished_at:
+            finished_at = row.finished_at
+            started_at = row.started_at
+            if finished_at.tzinfo is None:
+                finished_at = finished_at.replace(tzinfo=timezone.utc)
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            elapsed = max(0, round((finished_at - started_at).total_seconds(), 1))
+        processed = payload.get("processed", 0)
+        failed = payload.get("failed", 0)
+        errors = payload.get("errors", [])
+        source_errors = [
+            {
+                "title": source.get("name", "Unknown source"),
+                "error": source.get("error") or "Feed fetch failed",
+            }
+            for source in payload.get("source_results", [])
+            if source.get("status") == "error"
+        ]
+        run_errors = errors or source_errors
+        run = {
+            "id": row.id,
+            "job_type": row.job_type,
+            "status": row.status,
+            "started_at": row.started_at.isoformat(),
+            "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+            "elapsed_seconds": elapsed,
+            "processed": processed,
+            "succeeded": payload.get("succeeded", 0),
+            "failed": failed or len(run_errors),
+            "total": payload.get("total", 0),
+            "errors": run_errors[-5:],
+        }
+        runs.append(run)
+        estimated_input_tokens += payload.get("estimated_input_tokens", 0)
+        estimated_output_tokens += payload.get("estimated_output_tokens", 0)
+
+        stats = by_job.setdefault(row.job_type, {
+            "runs": 0, "completed": 0, "partial_runs": 0, "failed_runs": 0,
+            "total_duration_seconds": 0.0, "duration_samples": 0,
+            "processed": 0, "failed_items": 0,
+        })
+        stats["runs"] += 1
+        stats["completed"] += int(row.status == "completed")
+        stats["partial_runs"] += int(row.status == "partial")
+        stats["failed_runs"] += int(row.status in {"partial", "error", "interrupted"})
+        stats["processed"] += processed
+        stats["failed_items"] += run["failed"]
+        if elapsed is not None:
+            stats["total_duration_seconds"] += elapsed
+            stats["duration_samples"] += 1
+
+        for error in run_errors[-5:]:
+            dead_letter.append({
+                "run_id": row.id,
+                "job_type": row.job_type,
+                "started_at": row.started_at.isoformat(),
+                **error,
+            })
+
+    for stats in by_job.values():
+        samples = stats.pop("duration_samples")
+        total_duration = stats.pop("total_duration_seconds")
+        stats["avg_duration_seconds"] = round(total_duration / samples, 1) if samples else None
+        stats["success_rate"] = round(stats["completed"] / stats["runs"], 3) if stats["runs"] else None
+
+    return {
+        "queue": {
+            "enrichment_pending": db.query(Article).filter(Article.enrichment_status == "pending").count(),
+            "enrichment_errors": db.query(Article).filter(Article.enrichment_status == "error").count(),
+            "sources_failing": db.query(Source).filter(Source.consecutive_failures > 0).count(),
+        },
+        "summary": by_job,
+        "recent_runs": runs[:20],
+        "dead_letter": dead_letter[:20],
+        "model_usage": {
+            "available": bool(estimated_input_tokens or estimated_output_tokens),
+            "estimated_input_tokens": estimated_input_tokens,
+            "estimated_output_tokens": estimated_output_tokens,
+            "estimated_total_tokens": estimated_input_tokens + estimated_output_tokens,
+            "estimated_cost_usd": None,
+            "note": "Token counts are character-based estimates. Dollar cost is unavailable because provider pricing is not configured.",
+        },
+    }
+
+
 class UserProfileUpdate(BaseModel):
     sectors: Optional[list[str]] = None
     threat_actors: Optional[list[str]] = None
@@ -212,6 +318,59 @@ class UserProfileUpdate(BaseModel):
     keywords: Optional[list[str]] = None
     geo_targets: Optional[list[str]] = None
     geo_origins: Optional[list[str]] = None
+
+
+class ModelComparisonRequest(BaseModel):
+    model_a: str
+    model_b: str
+    sample_size: int = 3
+
+
+@router.post("/model-comparison")
+async def model_comparison(body: ModelComparisonRequest, db: Session = Depends(get_db)):
+    models = [body.model_a.strip(), body.model_b.strip()]
+    if any(not model or len(model) > 200 for model in models):
+        raise HTTPException(400, "Both model names are required and must be at most 200 characters")
+    if models[0] == models[1]:
+        raise HTTPException(400, "Choose two different models")
+    if not 1 <= body.sample_size <= 5:
+        raise HTTPException(400, "sample_size must be between 1 and 5")
+
+    from app.services.model_comparison import article_case, compare_models, gold_case
+
+    gold_path = Path(__file__).parents[3] / "data" / "gold_set.json"
+    cases = []
+    using_gold = False
+    baseline = "Current stored enrichment, not a manually reviewed gold set"
+    if gold_path.exists():
+        try:
+            gold = json.loads(gold_path.read_text())
+            cases = [gold_case(case, i) for i, case in enumerate(gold[:body.sample_size])]
+            if cases:
+                using_gold = True
+                baseline = f"Reviewed gold set ({gold_path.name})"
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(500, f"Could not load gold set: {exc}") from exc
+    if not cases:
+        articles = (
+            db.query(Article)
+            .filter(Article.enrichment_status == "enriched", Article.scraped_text.isnot(None))
+            .order_by(Article.enriched_at.desc())
+            .limit(body.sample_size)
+            .all()
+        )
+        cases = [article_case(article) for article in articles]
+    if not cases:
+        raise HTTPException(400, "No gold-set cases or enriched articles with retained text are available")
+
+    result = await compare_models(cases, models)
+    return {
+        **result,
+        "sample_size": len(cases),
+        "baseline": baseline,
+        "gold_set": using_gold,
+        "note": "Comparison is read-only and does not replace stored enrichment.",
+    }
 
 
 def _profile_to_dict(p) -> dict:
@@ -371,6 +530,59 @@ async def refresh_benign_domains():
     except Exception as e:
         raise HTTPException(502, f"Download failed: {e}")
     return {"domains": count}
+
+
+@router.get("/models")
+async def list_local_models():
+    """Return locally installed model names from the configured LLM provider."""
+    from app.services.llm_client import is_anthropic
+    if is_anthropic():
+        return {"models": [], "provider": "anthropic"}
+    import httpx
+    base = app_settings.LLM_BASE_URL.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base}/models")
+            resp.raise_for_status()
+            data = resp.json()
+        names = sorted(m["id"] for m in data.get("data", []))
+        return {"models": names, "provider": "ollama"}
+    except Exception:
+        return {"models": [], "provider": "ollama"}
+
+
+class SetModelRequest(BaseModel):
+    model: str
+
+
+@router.post("/model")
+async def set_active_model(body: SetModelRequest):
+    """Update the active LLM model in memory and persist it to .env."""
+    model = body.model.strip()
+    if not model or len(model) > 200:
+        raise HTTPException(400, "Invalid model name")
+
+    # Update in memory
+    app_settings.LLM_MODEL = model
+
+    # Clear the cached client so the next call picks up the new model
+    from app.services.llm_client import get_llm_client
+    get_llm_client.cache_clear()
+
+    # Persist to .env — search cwd then parent for the file
+    from pathlib import Path
+    for candidate in [Path.cwd() / ".env", Path.cwd().parent / ".env"]:
+        if candidate.exists():
+            text = candidate.read_text()
+            import re as _re
+            if _re.search(r"^LLM_MODEL\s*=", text, _re.MULTILINE):
+                text = _re.sub(r"^(LLM_MODEL\s*=).*", rf"\g<1>{model}", text, flags=_re.MULTILINE)
+            else:
+                text = text.rstrip("\n") + f"\nLLM_MODEL={model}\n"
+            candidate.write_text(text)
+            break
+
+    return {"model": model}
 
 
 @router.post("/scoring/reset", response_model=ScoringConfigOut)

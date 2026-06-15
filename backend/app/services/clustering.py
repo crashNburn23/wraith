@@ -8,19 +8,32 @@ Strategy (applied with Union-Find, most reliable first):
      when EMBEDDING_MODEL is configured (embeddings stored at enrichment time).
 
 After grouping, the highest-ranked (lowest rank number) article in each cluster
-becomes the lead. Singletons get cluster_id=None so the UI can skip them cleanly.
+becomes the lead. Candidate clusters are then confirmed by the LLM. Singletons
+get cluster_id=None so the UI can skip them cleanly.
 """
+import asyncio
+import json
 import logging
 from collections import Counter
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.bulletin import Bulletin, BulletinItem
+from app.services.llm_client import llm_complete
+from app.services.prompt_safety import UNTRUSTED_CONTENT_RULE, untrusted_block
 
 logger = logging.getLogger(__name__)
 
 SIMILARITY_THRESHOLD = 0.80
+CLUSTER_CONFIRMATION_SYSTEM_PROMPT = f"""You confirm whether cybersecurity news articles cover the same story.
+{UNTRUSTED_CONTENT_RULE}
+
+Return only JSON with exactly one boolean key: {{"same_story": true}} or {{"same_story": false}}.
+
+same_story=true only when every article covers the same specific incident, campaign, vulnerability disclosure,
+or report. Shared threat actors, techniques, products, or broad themes alone are not enough."""
 
 
 def _find(parent: dict, x: str) -> str:
@@ -110,3 +123,83 @@ def cluster_bulletin_items(db: Session, bulletin: Bulletin) -> None:
         len(root_to_uuid),
         len(items) - n_clustered,
     )
+
+
+def _confirmation_prompt(items: list[BulletinItem]) -> str:
+    blocks = []
+    for index, item in enumerate(sorted(items, key=lambda i: i.rank), start=1):
+        article = item.article
+        content = f"Title: {article.title}\nSummary: {article.ai_summary or ''}"
+        blocks.append(untrusted_block(f"candidate_article_{index}", content, 2500))
+    return (
+        "Do all of these articles cover the same specific story?\n\n"
+        + "\n\n".join(blocks)
+    )
+
+
+def _parse_confirmation(raw: str) -> bool:
+    text = raw.strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else text
+        if text.startswith("json"):
+            text = text[4:].lstrip()
+    value = json.loads(text).get("same_story")
+    if not isinstance(value, bool):
+        raise ValueError("LLM cluster confirmation did not return a boolean same_story")
+    return value
+
+
+def _dissolve_cluster(items: list[BulletinItem]) -> None:
+    for item in items:
+        item.cluster_id = None
+        item.is_cluster_lead = True
+        item.cluster_size = 1
+
+
+async def confirm_story_clusters(bulletin: Bulletin) -> None:
+    """Confirm deterministic candidate clusters with one LLM call per cluster.
+
+    Confirmation is fail-open: an unavailable or malformed LLM response leaves
+    the deterministic candidate intact so bulletin generation remains reliable.
+    """
+    if not settings.LLM_CONFIRM_STORY_CLUSTERS:
+        return
+
+    candidates: dict[str, list[BulletinItem]] = {}
+    for item in bulletin.items:
+        if item.cluster_id:
+            candidates.setdefault(item.cluster_id, []).append(item)
+
+    for cluster_id, items in candidates.items():
+        if len(items) < 2:
+            continue
+        try:
+            raw = await llm_complete(
+                _confirmation_prompt(items),
+                max_tokens=40,
+                system=CLUSTER_CONFIRMATION_SYSTEM_PROMPT,
+            )
+            if not _parse_confirmation(raw):
+                _dissolve_cluster(items)
+                logger.info(
+                    "LLM rejected candidate cluster %s in bulletin %s",
+                    cluster_id,
+                    bulletin.bulletin_date,
+                )
+        except Exception as e:
+            logger.warning(
+                "LLM cluster confirmation failed for %s; keeping candidate: %s",
+                cluster_id,
+                e,
+            )
+
+
+def confirm_story_clusters_sync(bulletin: Bulletin) -> None:
+    """Run async LLM confirmation from the synchronous bulletin builder."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(confirm_story_clusters(bulletin))
+        return
+    logger.warning("Skipping LLM cluster confirmation because an event loop is already running")

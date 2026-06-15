@@ -1,0 +1,408 @@
+[
+  {
+    "title": "Critical Splunk Enterprise Flaw Lets Attackers Run Code Without Authentication",
+    "text": "Splunk has released security updates to address a critical security flaw in Splunk Enterprise that could be exploited to conduct unauthenticated file operations and even remote code execution.\nThe vulnerability, tracked as CVE-2026-20253, is rated 9.8 on the CVSS scoring system.\n\"In Splunk Enterprise versions below 10.2.4 and 10.0.7, an unauthenticated user could create or truncate arbitrary files through a PostgreSQL sidecar service endpoint,\" Splunk said in an alert this week.\n\"The vulnerability exists because the PostgreSQL sidecar service endpoint lacks authentication controls, allowing any network-reachable user to invoke file operations without credentials.\"\nThe issue has been addressed in the following versions -\n- Splunk Enterprise 10.0.0 to 10.0.6 - Fixed in 10.0.7\n- Splunk Enterprise 10.2.0 to 10.2.3 - Fixed in 10.2.4\n- Splunk Enterprise 10.4 - Not affected\nSplunk, which is part of Cisco, said Splunk Cloud is not impacted by the vulnerability as Postgres sidecars are not used in the product.\nWhat the Flaw is All About\nOn Friday, watchTowr Labs released additional technical details of CVE-2026-20253, stating it could be exploited to achieve pre-authenticated remote code execution on susceptible systems through the \"/v1/postgres/recovery/backup\" and \"/v1/postgres/recovery/restore\" endpoints.\nThe attack chain works as follows -\n- Connect to an attacker-controlled database and dump its contents into an arbitrary file using the /backup endpoint\n- Load the dump of the attacker-controlled database into the local PostgreSQL instance using the /restore endpoint by including a \"passfile\" argument that specifies the path to a \".pgpass\" file (\"/opt/splunk/var/packages/data/postgres/.pgpass\") containing the password for the \"postgres_admin\" user\n- SQL queries defined in the database dump will get executed by Splunk's PostgreSQL instance\nAn attacker could weaponize this weakness to define a new function that uses lo_export - a function used to extract a BLOB from the database and save it as a file on the file system - to write attacker-controlled content to a file, following which the function gets executed during the restoration process.\n\"At this point, we can authenticate, restore attacker-controlled SQL, and interact with the local database,\" security researchers Piotr Bazydlo and Yordan Ganchev said. \"Once we could restore attacker-controlled SQL into the local PostgreSQL instance, we quickly put together a database dump template that gave us a controlled file write.\"\nArmed with an arbitrary file write primitive on the Splunk file system, an attacker could escalate further to remote code execution by overwriting a Python script that Splunk frequently executes (e.g., \"/opt/splunk/etc/apps/splunk_secure_gateway/bin/ssg_enable_modular_input.py\") to include the malicious payload.\nThe entire sequence of actions is below -\n- Create a database and configure it such that a user can authenticate without a password and grant it sufficient permissions to invoke functions like lo_export\n- Use the /backup endpoint to drop a dump of the remote database onto the Splunk file system\n- Use the /restore endpoint to load the malicious database dump, trigger execution of the malicious function during the restore process, and write an attacker-controlled Python script to the Splunk file system\nAlthough there is no evidence of the flaw being exploited in the wild, the availability of the exploit specifics can be enough to drive threat actors to trigger opportunistic attempts. It's essential that users move quickly to apply the fixes to stay protected.",
+    "expected": {
+      "threat_category": "Vulnerability",
+      "severity_score": 78.0,
+      "cves": [
+        "CVE-2026-20253"
+      ],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1190"
+      ],
+      "geo_origin": null,
+      "geo_targets": [],
+      "sector_targets": [
+        "Technology",
+        "Finance",
+        "Government"
+      ]
+    }
+  },
+  {
+    "title": "Chinese hackers hijack auth flow, spy on isolated network for a decade",
+    "text": "Chinese hackers took control of a target organization's authentication stack and maintained persistence for 10 years, with full visibility into the administrative activity.\nDubbed \"Operation Highland,\" the intrusion is attributed to the Velvet Ant cyberespionage threat group, which targeted vulnerable internet-facing systems before pivoting to a network with no direct external path.\nChinese hackers of the \u201cVelvet Ant\u201d activity cluster breached the isolated critical infrastructure network of a large organization and conducted cyber-espionage operations for 10 years.\nThe campaign, dubbed \u201cOperation Highland\u201d by Sygnia researchers who discovered it, began in 2016, targeting vulnerable internet-facing systems before pivoting to an \u201cair-gapped\u201d environment with no direct internet connection.\nVelvet Ant\u2019s lengthy espionage operations were documented in 2024, when Sygnia warned of a campaign targeting F5 BIG-IP devices that operated undetected for three years.\nAlso in 2024, Cisco warned of a zero-day in NX-OS running on Nexus switches, which was exploited by Velvet Ant to gain access to targets.\nVelvet Ant attack chain\nThe attack begins with the compromise of internet-facing servers, though the researchers don\u2019t mention the specific product or any vulnerability used.\nVelvet Ant deployed a modified GS-Netcat reverse shell disguised as a legitimate system component that connected to a hardcoded relay domain, providing encrypted remote shell access.\nThe shell achieved persistence either via a malicious systemd service or through startup script modification.\nNext, Velvet Ant installed a custom SOCKS5 proxy for network traffic tunneling, enabling it to reach internal systems that are not directly accessible from the internet.\nThe proxy ran as a daemon masquerading as \u2018smbd -D,\u2019 using different filenames and ports on each host, and turning compromised servers into internal pivot points.\nThe most interesting part of the attack was building a remote execution path into the isolated network.\nTo achieve this, Velvet Ant modified the configuration of a compromised internet-facing Nginx server to proxy specially crafted requests to a compromised backend server.\nThe backend server's Nginx configuration was also altered to forward requests to a FastCGI process (fcgiwrap) listening on a separate port.\nThe FastCGI wrapper acted as an execution bridge, processing requests and launching a custom binary named \u2018uptime.\u2019\nThe tool established SSH connections to systems within the isolated critical infrastructure network using parameters supplied in HTTP POST requests.\n\"By chaining these modifications, Velvet Ant established a remote-execution path into the segregated environment via simple HTTP requests, with no direct connection to the critical infrastructure network ever required.\" - Sygnia\nHaving established their access into the isolated environment, Velvet Ant shifted focus to long-term persistence and credential theft by targeting Linux Pluggable Authentication Modules (PAM), a set of libraries that let administrators set up methods to authenticate users.\nThe attackers replaced legitimate \u2018pam_unix.so\u2019 modules with backdoored versions that accept hardcoded passwords and harvest user credentials.\nSygnia identified nine distinct variants of the malicious PAM module, each compiled in a separate build environment, indicating a well-resourced threat actor.\nThe researchers say that two of the malicious PAM modules stand out for acting as a backdoor only and for collecting credentials.\nVelvet Ant actors also replaced OpenSSH components such as ssh, sshd, and scp with trojanized versions that captured credentials, logged commands entered during SSH sessions, and stored the collected data locally for future retrieval.\nSygnia says that by extending control to the authentication process by modifying the PAM and OpenSSH components, the threat actor had access to credentials as they were used in the target environment and could bypass the authentication flow.\n\"Administrative activity became fully observable: every login; every command executed across compromised hosts. Access was no longer tied to a specific foothold but embedded into the authentication process itself,\" the researchers explain.\nThis way, the hackers ensured their persistence despite password changes and session terminations, and reduced \"the effectiveness of conventional containment measures.\"\nComplex cleanup\nSygnia says even after discovering the compromise, remediating it and removing Velvet Ant from the compromised environment was particularly complicated.\nThe threat actors had replaced so many critical components with custom versions that removing them was likely to break authentication, lock legitimate administrators out, and cause operational outages.\nTo tackle this problem, the researchers built a testing lab to validate the binary replacement process, profiled each host, tested the results, and prepared rollback procedures before attempting the cleanup.\nSygnia recommends that defenders treat authentication components such as PAM, OpenSSH, and Windows LSASS as critical security assets and protect them with EDR, file integrity monitoring, hardened privileged access, multi-factor authentication (MFA), and continuous monitoring for unauthorized modifications.\nOrganizations should plan for offline recovery, which includes strict backups with an adequate schedule for automatically creating snapshots with immutable copies.\nThe restoration process should consider testing the backups and recovery hosts running operating systems that have been validated, along with the recovery scripts.\nTest every layer before attackers do\nSecurity teams log 54% of successful attacks and alert on just 14%. The rest move through your environment unseen.\nThe Picus whitepaper shows how breach and attack simulation tests your SIEM and EDR rules so threats stop slipping by detection.\nGet the whitepaper",
+    "expected": {
+      "threat_category": "APT",
+      "severity_score": 65.0,
+      "cves": [],
+      "threat_actors": [
+        "Velvet Ant"
+      ],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1056",
+        "T1098",
+        "T1078"
+      ],
+      "geo_origin": "China",
+      "geo_targets": [
+        "US",
+        "EU"
+      ],
+      "sector_targets": [
+        "Critical Infrastructure"
+      ]
+    }
+  },
+  {
+    "title": "Suspected North Korean actors use fake \u2018coding assignments\u2019 to steal crypto",
+    "text": "Suspected North Korean threat actors are targeting developers with fake job offers and \u201ccoding assignments\u201d that lead to the deployment of cross-platform malware for cryptocurrency and credential theft, Proofpoint reported Monday.The threat cluster, tracked as UNK_DeadDrop, shows similarities to Contagious Interview and sent more than 250 emails across nearly 100 target companies over a six-week period between April and May 2026. The emails mostly targeted technology, education, business services, financial services, entertainment/media companies and telecommunications companies in the United States, with a particular focus on the cryptocurrency industry.In the emails, the attackers pose as recruiters from legitimate companies such as the decentralized finance company Ondo Finance, the telehealth company Nourish and the Web3 and AI talent agency Hypen Connect, offering the target to apply for a software development role and complete a coding assignment.In some cases, the attackers also presented as fake cryptocurrency and AI startups, with names like Pulsynk and Trixauvex, requesting the target for a peer-review of their code. In either case, the attacker included a link to a GitHub or GitLab repository with instructions to clone the repo to Visual Studio Code (VS Code) or Cursor code editors. The repositories include a hidden tasks.json file that abuses VS Code and Cursor\u2019s task automation abilities to automatically execute malicious files when a certain project folder is open in the editor. VS Code will prompt the user to approve the task execution while Cursor does not display a prompt, Proofpoint noted.\nRelated reading:\nThe malware acts differently depending on whether the victim is using Windows, Linux or macOS.On Linux and macOS systems, the attacker leverages an open-source command-and-control (C2) framework called Overlord, deploying Go binaries with remote access trojan (RAT) capabilities that establish a persistent WebSocket connection to the attacker\u2019s servers.On Windows systems, the attack chain runs as JavaScript within the code editor\u2019s Electron process and performs a single infostealer operation without persistence, Proofpoint said.The Overlord RAT first extracts browser wallet extensions and standalone wallet directories and transmits them as a ZIP archive to the C2 server. Five minutes later, it displays a fake system dialog prompt for the user to enter their system password, leveraging a Mach-O binary on macOS systems and the Zenity tool on Linux systems. If the user enters their password, the malware leverages the password to extract browser credentials from Keychain and GNOME Keyring and subsequently relaunches itself as root to perform further Keychain and GNOME Keyring dumps.On Windows, the malicious task launches a VBScript that calls a CMD file, which then decodes an additional embedded script that stages three encrypted payloads. These payloads are decrypted at runtime and serve to facilitate infostealing capabilities.The malware scans for 35 Chromium browser wallet extensions and 18 standalone wallet applications and also uses a Python-based stealer to extract passwords from Chromium and Firefox browsers, and cookies from Chrome, Edge and Brave browsers. The stolen data is sent to the C2 server via an HTTP POST request.The malicious task also installs a malicious VSIX extension that enables persistence on Linux and macOS machines, causing the malware processes to be relaunched every time VS Code or Cursor are opened. This extension is installed on Windows machines but does not re-execute the malicious operation on these machines.Proofpoint found that UNK_DeadDrop mainly emailed victims from domains registered via Namecheap set up with MailHostBox mailservers. Some of the domains were hosted on Vercel and included websites promoting the fake startups that were likely AI-generated, the researchers said.UNK_DeadDrop\u2019s victim targeting, social-engineering techniques and theft of cryptocurrency wallets and credentials overlap with the North Korean Contagious Interview campaign. However, this cluster shows some distinct techniques such as the use of email rather than social media channels like LinkedIn to contact victims, the abuse of task.json auto-execution rather than npm installation, and the use of Overlord Go binaries rather than other malware known to be used by Contagious Interview, such as OtterCookie and FlexibleFerret.\u201cThe consistent creation of new GitHub repositories as well as a new malware framework with iterative builds and a stealthy new execution and persistence technique through VSIX extensions demonstrates dedicated resourcing and active development of tooling,\u201d the researchers concluded.\nGet daily email updates\nSC Media's daily must-read of the most current and pressing daily news\nYou can skip this ad in 5 seconds",
+    "expected": {
+      "threat_category": "Phishing",
+      "severity_score": 50.0,
+      "cves": [],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1059",
+        "T1203"
+      ],
+      "geo_origin": null,
+      "geo_targets": [
+        "US"
+      ],
+      "sector_targets": [
+        "Technology",
+        "Financial Services"
+      ]
+    }
+  },
+  {
+    "title": "Europol Disrupts AudiA6 Crypto Laundering Service Used by Ransomware Gangs",
+    "text": "Authorities in Europe have disrupted AudiA6, a cryptocurrency laundering service used by ransomware gangs and cybercriminal networks.\nEuropol, in a statement issued Thursday, said the dismantling of AudiA6 cut off a \"key financial pipeline used to wash hundreds of millions in illicit profits.\" The service is estimated to have been used to launder more than \u20ac336 million (~$389 million) since the service was launched in 2021.\n\"The platform became a central hub for ransomware actors and cybercriminals seeking to cash out stolen digital assets while hiding the money trail from authorities,\" the agency added.\nThe operators of AudiA6 are suspected to have also administered a dark web cybercrime forum known as Dark2Web, where cybercriminals advertised illicit services and connected with other threat actors across the world.\nAs part of the operation that took place on June 10, 2026, a number of coordinated actions were carried out, including -\n- The arrest of two alleged administrators of Ukrainian and Russian nationality in Georgia\n- Three property searches\n- Takedown of 25 domains and seizure of more than 30 servers\n- Seizure of more than 80 vehicles and multiple properties in Georgia\n- Freezing cryptocurrency assets worth \u20ac692,000 ($798,000) and seizure of \u20ac86,000 ($99,400) in cryptocurrency\n- Blocking Telegram accounts used by the network\n- Replacing the clear web and dark web websites of AudiA6 and Dark2Web with a law enforcement seizure banner\nIn tandem, the U.S. Department of Justice (DoJ) announced charges against the two arrested individuals - Ruslan Igorevich Tkachuk, 37, and Alexander Vladimirovich Ledenev, 25 - accusing them of one count of conspiracy to launder monetary instruments and one count of sting money laundering. If convicted, both of them face a maximum possible sentence of 20 years in prison.\n\"Out of the approximately 10,333 bitcoin deposited, approximately 393.39 BTC (valued at around $19,234,331 at the time of the transactions) were received directly from known darknet markets, ransomware organizations, cybercrime services, and other illicit sources, while additional funds were deposited indirectly from illicit sources into AudiA6 wallets,\" the DoJ said.\nEuropol said the crackdown was the result of an earlier enforcement action carried out by the Polish Police that led to the arrest of an Ukrainian national in September 2025 for their alleged involvement in money laundering activities connected to the AudiA6 group.\nThis made it possible for authorities to initiate a forensic examination of the seized electronic devices belonging to the suspect and identify additional individuals linked to the operation.\nAudiA6 has been described as an industrial-scale cryptocurrency laundering operation that relied on thousands of fraudulent exchange accounts opened using stolen or purchased identities. The criminal service has been linked to more than 15 investigations worldwide related to ransomware attacks and large-scale cryptocurrency theft.\nPrior to its disruption, AudiA6 was marketed as a cryptocurrency mixing service guaranteeing anonymity and speed. It allowed customers to transfer their ill-gotten proceeds to wallets controlled by the group and received \"cleaned\" funds in return within an hour through a \"complex chain of transactions\" designed to conceal the origin of the funds.\nThese transactions took place over private messaging platforms, with the operators charging commissions ranging from commissions of between 3 percent and 10 percent.\n\"More than 6,000 Know Your Customer (KYC) records linked to money mule accounts were identified during the investigation,\" Europol said. \"Many of the mule accounts were connected to Russian-speaking intermediaries recruited specifically to help move criminal proceeds through cryptocurrency exchanges.\"\nAudiA6 is also said to have relied on both commercial email providers and email addresses linked to domains under their control to register money mule accounts with various cryptocurrency exchanges. The names of the domains are listed below -\n- designli.pictures\n- pheontx.eu\n- smplfy.in\n- sumato-soft.org\n- technobrains.dev\n- lett.email\n- trayo.app\n- deliverly.top\n- inboxly.top\n- postfast.eu\n- postino.click\n- inboxally.agency\n- mailora.eu\n- postify.email\n- quix.express\n- flowcomm.click\n- qube.black\n- deliverlett.com\n- lettermail.eu\nIn a report published in November 2021, Intel 471 disclosed that AudiA6 required a minimum balance of 27 bitcoins and that it charged a flat service fee between 3 percent and 5.5 percent. As recently as December 2025, a TRM Labs analysis found that funds stolen from the 2022 LastPass hack were routed through Cryptex and AudiA6.\nThe investigation was carried out by the United States Secret Service and the IRS Criminal Investigation, along with the Polish Police and law enforcement partners from Australia, Canada, France, Georgia, Germany, Iceland, Japan, Switzerland, and the U.K.\nThe findings illustrate the rise of industrial-scale cryptocurrency laundering services that enable the cybercrime economy, as well as the use of fraudulent exchange accounts, mule wallets and privacy-focused tools designed to cover up the money trail and bypass anti-money laundering controls.\n\"Ransomware groups and cybercriminal networks are increasingly relying on chain-hopping, decentralised exchanges and 'mixer-as-a-service' platforms to move illicit cryptocurrency across multiple blockchains within minutes, helping criminal profits disappear into the digital underground,\" Europol said.",
+    "expected": {
+      "threat_category": "Ransomware",
+      "severity_score": 55.0,
+      "cves": [],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [
+          "designli.pictures",
+          "pheontx.eu",
+          "smplfy.in",
+          "sumato-soft.org",
+          "technobrains.dev",
+          "lett.email",
+          "trayo.app",
+          "deliverly.top",
+          "inboxly.top",
+          "postfast.eu",
+          "postino.click",
+          "inboxally.agency",
+          "mailora.eu",
+          "postify.email",
+          "quix.express",
+          "flowcomm.click",
+          "qube.black",
+          "deliverlett.com",
+          "lettermail.eu"
+        ],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1569"
+      ],
+      "geo_origin": null,
+      "geo_targets": [
+        "EU",
+        "Georgia"
+      ],
+      "sector_targets": []
+    }
+  },
+  {
+    "title": "INTERPOL Operation Takes Down Sniper Dz Phishing Platform, Arrests Administrator",
+    "text": "An INTERPOL-led operation last month resulted in the disruption of Sniper Dz, a decade-long phishing-as-a-service (PhaaS) platform, Group-IB said Thursday.\nThe effort, codenamed Operation Ramz, took place between October 2025 and February 2026, and saw authorities from 13 countries in the Middle East and North Africa (MENA) region making 201 arrests.\nIncluded among them was Guedz, the primary developer and administrator of Sniper Dz, a PhaaS service that's said to have collected more than 45,000 victim records. The arrest was made by the Algerian National Police. Over the years, the platform rebranded itself as Joker Dz, Storm Dz, and Spam Dz.\nAs part of Operation Ramz, the website used to offer PhaaS capabilities to other cybercriminals was taken down. Authorities also seized hardware containing phishing software and scripts.\n\"Active since at least 2015, Sniper Dz evolved into a sophisticated criminal platform offering ready-made phishing kits, hosting infrastructure, and operational support to cybercriminals,\" the Singapore-headquartered cybersecurity company said.\nIn the years since then, more than 20,000 unique domains associated with the PhaaS service have been identified. The toolkit primarily targeted 30 major global organizations, including PayPal, Facebook, Instagram, Yahoo, Netflix, and Steam, using 80 phishing templates deployed in five languages, including Arabic, English, French, Spanish, and Hebrew.\nPhishing campaigns using Sniper Dz singled out users of technology, social media, and streaming platforms across several geographies by impersonating popular brands and government entities using convincing imitation websites with the goal of harvesting credentials, personal information, and other sensitive data.\n\"Beyond traditional credential theft, the platform also leveraged social engineering techniques that exploited the popularity and credibility of public figures across the Middle East and North Africa,\" Group-IB explained. \"Threat actors created fake social media accounts impersonating well-known political personalities and used them to promote phishing links disguised as promotional offers or free internet access.\"\nSniper Dz was the subject of a comprehensive analysis by Palo Alto Networks Unit 42 in October 2024, which detailed the threat actor's use of a Telegram channel with more than 7,300 subscribers to share tutorial videos and the options it provides to host the phishing pages on its own infrastructure behind a proxy server.\nWhat made Sniper Dz stand out from the crowded PhaaS market is that it offered its entire infrastructure for free, making it easier for aspiring cybercriminals to pull off phishing campaigns at scale. The monetization avenues instead relied on credential theft and victim traffic.\n\"Stolen credentials could be harvested through phishing campaigns, while users who did not yield credentials could still be redirected into carrier billing fraud, premium SMS subscriptions, browser notification abuse schemes, and other affiliate-driven scam campaigns,\" Group-IB said.",
+    "expected": {
+      "threat_category": "Phishing",
+      "severity_score": 55.0,
+      "cves": [],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [
+          "sniper-dz.com"
+        ],
+        "hash": [],
+        "url": [],
+        "email": [
+          "admin@sniper-dz.com"
+        ]
+      },
+      "ttps": [
+        "T1566"
+      ],
+      "geo_origin": null,
+      "geo_targets": [
+        "Middle East",
+        "North Africa",
+        "Global"
+      ],
+      "sector_targets": [
+        "Technology",
+        "Social Media",
+        "Streaming"
+      ]
+    }
+  },
+  {
+    "title": "LangGraph Flaw Chain Exposes Self-Hosted AI Agents to Remote Code Execution",
+    "text": "Cybersecurity researchers have disclosed details of three now-patched security flaws impacting LangGraph, including a critical vulnerability chain that could result in remote code execution.\nLangGraph is an open-source framework created by LangChain to build complex, stateful, and multi-agent artificial intelligence (AI) agentic applications.\n\"An SQL injection in LangGraph's function could allow attackers to gain full control via remote code execution of a server by exploiting weaknesses in how the system processes and handles data,\" Check Point said.\nThe list of identified vulnerabilities is as follows -\n- CVE-2025-67644 (CVSS score: 7.3) - A SQL injection vulnerability exists in LangGraph's SQLite checkpoint implementation that allows attackers to manipulate SQL queries through metadata filter keys. (Affects langgraph-checkpoint-sqlite versions before 3.0.1)\n- CVE-2026-28277 (CVSS score: 6.8) - An unsafe msgpack deserialization vulnerability in LangGraph that could be used to trigger object reconstruction when a checkpoint is loaded by an attacker who can modify checkpoint data. (Affects langgraph versions before 1.0.10)\n- CVE-2026-27022 (CVSS score: 6.5) - A RediSearch Query Injection in @langchain/langgraph-checkpoint-redis that can be used to bypass access controls. (Affects @langchain/langgraph-checkpoint-redis versions before 1.0.1)\n\"The vulnerability chain is exploitable in self-hosted deployments using the SQLite or Redis checkpointer with user-controlled filter input,\" Check Point said. \"LangChain's managed platform (LangSmith Deployment), is not affected.\"\nSecurity researcher Yarden Porat, who is credited with discovering and reporting all three flaws, said CVE-2025-67644 and CVE-2026-28277 could be chained to achieve remote code execution.\nSpecifically, the attack chain hinges on the application exposing the get_state_history() endpoint, which then allows an attacker to retrieve historical checkpoints based on their metadata. It requires the following steps -\n- The attacker prepares a msgpack payload containing instructions to execute arbitrary code.\n- The attacker sends a malicious filter parameter that exploits the SQL injection vulnerability to return a fake checkpoint row to the database query results, where the checkpoint column contains attacker-controlled serialized data.\n- When the application processes the query results, it deserializes the malicious checkpoint's BLOB.\n- The attacker exploits the unsafe deserialization vulnerability to execute the attacker's payload, giving them remote code execution on the server.\nLangGraph has described CVE-2026-28277 as a post-exploitation issue, where successful exploitation requires the ability to write attacker-controlled checkpoint data and turn that into code execution in the application runtime, and it does not pose any risks to existing LangSmith-hosted deployments.\nIn such a scenario, this escalation from write access to checkpoint store\" to code execution may \"expose runtime secrets or provide access to other systems the runtime can reach,\" LangGraph maintainers said. \"The described threat model requires an attacker to tamper with the checkpoint persistence layer used by the deployment; typical hosted configurations are designed to prevent such access.\"\nCheck Point said the findings illustrate how classic vulnerability classes like SQL injection can become more potent when they manifest inside AI agent frameworks that carry elevated access and trust, thereby opening the door to sensitive data exposure.\nUsers are advised to apply the latest fixes, implement authentication for self-hosted LangGraph servers, avoid long-lived static secrets, enforce network segmentation, treat AI agents as privileged identities, and apply the principle of least privilege (PoLP) to limit the agent's access footprint.",
+    "expected": {
+      "threat_category": "Vulnerability",
+      "severity_score": 58.0,
+      "cves": [
+        "CVE-2025-67644",
+        "CVE-2026-28277",
+        "CVE-2026-27022"
+      ],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1190",
+        "T1204"
+      ],
+      "geo_origin": null,
+      "geo_targets": [],
+      "sector_targets": []
+    }
+  },
+  {
+    "title": "Agentjacking Attack Tricks AI Coding Agents Into Running Malicious Code",
+    "text": "Cybersecurity researchers have described what they say is a new class of attack that can trick artificial intelligence (AI) coding agents into running arbitrary code on developer machines.\nCalled Agentjacking by Tenet Security, the attack can be triggered by means of a fake error report crafted using Sentry, an open-source error-tracking and performance-monitoring platform.\n\"The attack exploits a critical architectural flaw at the intersection of Sentry's event ingestion (which accepts arbitrary payloads from anyone with the DSN) and the Sentry MCP server (which returns this data to AI agents as trusted system output),\" security researchers Ron Bobrov, Barak Sternberg, and Nevo Poran said.\nThe idea is to inject crafted input into Sentry error events, which are then interpreted by coding agents like Claude Code and Cursor as legitimate diagnostic resolution steps and run attacker-controlled code.\nA successful attack of this kind can expose sensitive data, including environment variables, Git credentials, private repository URLs, and developer identities, without having to rely on methods like phishing or prior server compromise.\nThe problem is rooted in the implicit trust associated with connecting to external services using Model Context Protocol (MCP). Because an AI agent is unable to distinguish between an error event generated by a real application crash or injected by an attacker, it creates a pathway to arbitrary code execution when the agent processes the response.\nThe attack chain devised by Tenet is as follows -\n- An attacker finds a target's Sentry Data Source Name (DSN), a public, write-only credential that's embedded in websites.\n- The attacker sends a malicious error event to Sentry's ingest endpoint via a POST request using the DSN.\n- The injected event contains \"carefully formatted markdown\" in the message field and context key names. When the Sentry MCP server returns this event to an AI agent, it is rendered as structured content visually identical to the Sentry's system template.\n- When a developer asks their AI coding agent to \"fix unresolved Sentry issues\" (or a similar prompt), the agent queries Sentry via MCP and receives the malicious event.\n- The agent executes malicious code, which runs with the developer's full privileges.\n\"The attacker never touches the victim's infrastructure,\" the researchers explained. \"The malicious instruction arrives disguised as a legitimate 'Resolution' inside an ordinary error. When a developer asks their AI agent to fix the Sentry issue, the agent reads the attacker's command as trusted guidance and runs it - with the developer's own privileges, on the developer's own machine.\"\nAgentjacking stands out because it targets the AI agent a developer trusts and uses a Sentry DSN as a starting point. In addition, the markdown injection is rendered such that the agent cannot distinguish it from legitimate Sentry guidance.\nThe AI cybersecurity company said it found at least 2,388 organizations exposed with valid injectable DSNs, and that it tested the attack in a controlled manner against over 100 organizations, achieving an 85% exploitation success rate against injected errors across some of the most widely used AI coding assistants.\nSentry, for its part, has acknowledged the issue, but opted not to fix it, stating it's \"technically not defensible.\" However, the company is said to have activated a global content filter that blocks a \"specific payload string.\"\n\"As enterprises race to deploy AI coding agents, this research proves the agents themselves are now the attack surface - turned against the developers who trust them, using nothing but data those organizations publish about themselves,\" Tenet said. \"The attack bypasses EDR, WAF, IAM, VPN, Cloudflare, and firewalls - because there is nothing malicious to detect. Every action in the chain is authorized.\"",
+    "expected": {
+      "threat_category": "Supply Chain",
+      "severity_score": 58.0,
+      "cves": [],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1059",
+        "T1195"
+      ],
+      "geo_origin": null,
+      "geo_targets": [],
+      "sector_targets": [
+        "Tech",
+        "Finance"
+      ]
+    }
+  },
+  {
+    "title": "China-Linked Hackers Backdoored Linux Login Software to Hide for Nearly a Decade",
+    "text": "Instead of hiding on the laptops and servers defenders watch most closely, a China-nexus group spent close to a decade hidden inside the Linux login system itself.\nSygnia, which tracks the group as Velvet Ant, says it backdoored the PAM and OpenSSH components that decide who is allowed to sign in, planting its access where ordinary cleanup could not reach it. The network it targeted had no direct internet access, so the group first staged through internet-facing systems to get there.\nThe earliest traces go back to 2016. Instead of dropping new malware that a scanner might catch, the attacker changed the trusted login programs themselves. Nothing obvious appeared, and no exploit was needed, so the activity looked like normal administration.\nOn many machines, the attacker replaced the main PAM login module with backdoored copies. Some let them in with a secret password; others quietly recorded real usernames and passwords as people logged in.\nResearchers found nine separate versions. The OpenSSH programs were altered the same way, logging credentials and every command typed, with a hidden switch to turn that logging off when needed.\nReaching the isolated network at all took extra work. The attacker used other disguised tools and an internet-facing web server as a bridge, passing commands through it to open remote sessions deep inside the segment that had no direct internet access.\nBecause the login system itself was compromised, normal containment did little. Password resets and killed sessions do not help when the thing that checks those credentials is working for the attacker.\nThis is not new for the group. Each time defenders find one foothold, Velvet Ant moves to gear they watch less and sets up there. In a 2024 case, Sygnia found the same actor turning internet-exposed F5 BIG-IP appliances into internal command servers.\nLater that year, it reported the group exploiting a Cisco NX-OS flaw, CVE-2024-20399, to plant a backdoor on the switches. That bug needs admin access first, so it is a persistence tool, not a remote break-in. Cisco patched it in July 2024, and CISA flagged it as exploited the next day.\nOperation Highland is the same idea, one level deeper. Load balancers, switches, and the login software itself are trusted by default and rarely checked, which is exactly why a patient attacker hides inside them.\nOperation Highland is not a one-CVE problem. The attacker changed trusted programs after getting in, so the fix is verification, not patching, and cleanup is delicate: a wrong replacement can lock admins out of a live system.\n- Watch the login files. Monitor the PAM and OpenSSH programs and their key files for any change, and alert when they change.\n- Hunt by checking what changed, not by waiting for an alert. Compare these programs against known-good copies, because nothing will flag them for you.\n- Remove the backdoor before resetting passwords, or the new ones get stolen the same way. Test any replacement in a lab first.\nThe earlier F5 and Cisco cases have their own checks: patch CVE-2024-20399 on Cisco Nexus gear, and watch F5 boxes for unexpected outbound connections.\nThe wider lesson is plain: infrastructure that sits outside normal monitoring still needs integrity checks, and that now includes the login layer.",
+    "expected": {
+      "threat_category": "APT",
+      "severity_score": 75.0,
+      "cves": [
+        "CVE-2024-20399"
+      ],
+      "threat_actors": [
+        "Velvet Ant"
+      ],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1078",
+        "T1543",
+        "T1554"
+      ],
+      "geo_origin": "China",
+      "geo_targets": [
+        "US",
+        "EU"
+      ],
+      "sector_targets": [
+        "Finance",
+        "Healthcare"
+      ]
+    }
+  },
+  {
+    "title": "Google Sues Chinese Smishing Network Accused of Using Gemini AI in Phishing",
+    "text": "Google on Friday said it's pursuing legal action against a Chinese cybercrime network, accusing it of using its Gemini artificial intelligence (AI) agent to send phishing text messages targeting Americans.\nThe network is said to be behind the development and management of a phishing-as-a-service (PhaaS) software kit called Outsider, per the tech giant.\n\"The operation weaponized Gemini to help generate fraudulent phishing pages and deploy massive SMS phishing ('smishing') attacks, often through text messages impersonating legitimate brands, alerting recipients of 'brokerage account issues' or insisting they are eligible for 'rewards through their mobile phone carrier,'\" Google said.\n\"The texts prompt users to click a link leading to a fraudulent website that mimics trusted institutions to steal personal and financial information.\"\nGoogle said it's filing the lawsuit to dismantle the network's infrastructure, and that it's partnering with AT&T, T-Mobile, and Verizon to block such messages from reaching customers.\nOutsider's operations, according to the company, are coordinated through Telegram, with the network distributing phishing kits that make it possible for threat actors to push fake text messages that claim to be from trusted brands. These schemes are estimated to have victimized more than 100,000 people, leading to millions of dollars in losses.\nIn addition, 9,000 fake websites and more than 1.59 million fraudulent URLs tied to the phishing service have been identified between November 14, 2025, and April 14, 2026. In a two-week period from May 18 to June 1, 2026, Outside was responsible for 55,000 spam texts flagged by Android users.\nDuring the same timeframe, 2.5 million messages were sent by the network to Android users containing links to Outsider-generated websites. For as little as $88 a week (or $200 a month), the kit allowed criminals to create fraudulent websites, launch phishing campaigns, and steal victims' credit card numbers, bank account credentials, and personal data. A license can be purchased via a \"self-service ordering bot\" on Telegram (@OutsiderCodeBot).\nThe service also offers more than 290 pre-built templates that impersonate legitimate websites of trusted institutions, real-time keystroke logging, and a performance dashboard to track the effectiveness of a campaign.\n\"As if Outsider's plug-and-play simplicity were not alarming enough, the Enterprise has made the tool even more powerful by providing step-by-step instructions on how Outsider can weaponize AI-generated code,\" Google said in its complaint filed in Manhattan federal court.\n\"Following those instructions, Enterprise members can use AI tools to generate programming code for a shell website, and copy and paste that code into Outsider to transform that shell into a fraudulent site that can be used to steal personal or financial information from their victims.\"\nGoogle said the prompts for Gemini and other AI platforms are framed as harmless requests for programming assistance, asking the model to generate HTML code to design a \"gift redemption page\" with the desired functionality and features, and instructing it to avoid using JavaScript and employ inline CSS to implement it. Once the counterfeit website is online, its URL is sent to potential victims via text messages.\nThe Outsider Enterprise is said to include a number of interconnected groups that play different roles, but collaborate to execute phishing attacks using the phishing kit. These include -\n- The Developer Group, which supplies the phishing software and templates\n- The Data Broker Group, which provides curated lists of people to target\n- The Spammer Group, which provides the tools to send fraudulent text messages in bulk\n- The Theft Group, which helps monetize stolen information (e.g., credit cards and credentials) and launder funds from stolen credit cards\n- The Telegram Group, which facilitates collaboration among members and recruits new members\nThe advantage with such services, as in the case of recently disrupted Sniper Dz, is that they dramatically lower the barrier to entry for novice fraudsters lacking programming knowledge, who can leverage them to mount convincing phishing attacks with minimal effort and at scale.\n\"The criminals behind the Outsider Enterprise built a business out of impersonating trusted brands to defraud hundreds of thousands of victims,\" said Brett Leatherman, assistant director of the U.S. Federal Bureau of Investigation's (FBI) Cyber Division. \"Criminals increasingly use AI to make fraud like this more convincing and harder to detect.\"\nThe FBI said the PhaaS platform accounted for at least an estimated 3,870,000 stolen credit cards and a corresponding estimated $1.9 billion in losses between July 2023 and the present. As part of a joint takedown called Operation Ghost Hook, a number of domains, including a Shopify e-commerce storefront and an account used to test the phishing service, have been seized.\nIn tandem, approximately $100,000 USDT from Outsider payment wallets have been confiscated, along with disrupting thousands of phishing domains from U.S. providers, rerouting them to an FBI splash page. The law enforcement agency also said it leveraged an Outsider Telegram bot to obtain information on the cybercrime network's customers.\nOperation Ghost Hook is part of Operation Riptide, which the FBI described as an ongoing campaign targeting the \"criminal actors, infrastructure, and financial networks behind cybercrime, cyber-enabled crime, and fraud against the American people.\"\nThe development comes exactly seven months after Google filed another lawsuit in the U.S. against China-based hackers behind a massive Phishing-as-a-Service (PhaaS) platform called Lighthouse that ensnared over 1 million users across 120 countries.\nUpdate\nThe Telegram bot (@OutsiderCodeBot) used to purchase Outsider licenses is no longer accessible.",
+    "expected": {
+      "threat_category": "Phishing",
+      "severity_score": 45.0,
+      "cves": [],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1566",
+        "T1078"
+      ],
+      "geo_origin": "China",
+      "geo_targets": [
+        "US"
+      ],
+      "sector_targets": [
+        "Finance",
+        "Retail"
+      ]
+    }
+  },
+  {
+    "title": "Over 400 Arch Linux AUR Packages Hijacked to Deploy Infostealer and eBPF Rootkit",
+    "text": "Attackers took over more than 400 packages in the Arch User Repository (AUR) this week and rewrote their build scripts to install a credential stealer on any machine that built them.\nThe malware is a Rust binary built to harvest developer secrets. When it lands with root, it can also load an eBPF rootkit to hide itself. The AUR is Arch Linux's community package collection, and it is separate from the official Arch repositories, which were not affected.\nIf you installed or updated an AUR package on or after June 11, check it against the current affected-package lists before trusting the host. The list of names is large, still growing, and not yet complete.\nThis attack goes after the trust model, not a software flaw. The compromised packages kept their names, their histories, and the trust that came with them. Only the build instructions changed.\nThe trap sat in the recipe, leaving the package itself looking exactly like the software users meant to install. No exploit, no zero-day, and no sign Arch's own systems were breached.\nThe attackers adopted abandoned packages, edited the build files, and let users run the payload for them. Sonatype, which named the campaign Atomic Arch, found them going after orphaned projects: packages whose maintainers had walked away, leaving them open for anyone to adopt.\nThey also spoofed git commit metadata so the changes looked like they came from a long-standing maintainer, an account an Arch Linux Trusted User later confirmed was never compromised.\nOnce a package was adopted, its PKGBUILD or .install script was edited to run npm install atomic-lockfile during the build, pulling the malicious npm package alongside a couple of legitimate ones for cover. That package, atomic-lockfile@1.4.2, carries a preinstall hook that runs a bundled Linux ELF named deps. Build the package, and the binary runs.\nConfirmed examples reported to the Arch mailing list include the alvr and premake-git packages.\nWhat the malware does\nIndependent researcher Whanos reverse-engineered the deps payload and describes a Rust credential stealer aimed at developer workstations and build systems. It collects:\n- Cookies, tokens, and local storage from Chromium-based browsers (Chrome, Edge, Brave, and many more)\n- Session data from Electron apps, including Slack, Discord, and Microsoft Teams\n- GitHub, npm, and HashiCorp Vault tokens, plus OpenAI/ChatGPT bearer material and account metadata\n- SSH keys, known_hosts, and shell histories\n- Docker and Podman credentials and VPN profiles\nStolen files go out over HTTP to temp.sh. Command and control runs through a Tor onion service via a local loopback proxy.\nFor persistence, it installs a systemd service with Restart=always. With root it copies itself under /var/lib/ and writes a unit under /etc/systemd/system/; as a normal user it uses the home directory and a per-user unit under ~/.config/systemd/user/. Either way, it wants to come back.\nEarly write-ups oversold the eBPF rootkit. It is optional, and it only loads when the binary already has root and the right capability. It is not used to gain privileges. When it does activate, it hides the malware's own processes, process names, and socket inodes from standard tools, using pinned BPF maps named hidden_pids, hidden_names, and hidden_inodes, and it kills attempts to attach a debugger.\nThat changes the cleanup advice. Removing the AUR package is not enough once the payload has run. A package manager can remove the files it knows about. It cannot prove the machine is clean after a rootkit-capable payload has had a chance to execute.\nThe binary also stages a second file tied to monero-wallet-gui that the analysis flags as a possible, unanalyzed cryptominer. An eBPF rootkit bolted onto a smash-and-grab stealer is unusual, and it is why this one is worth more than a shrug.\nScope, and a second wave\nSonatype's first write-up counted more than 20 hijacked packages. Within a day, community trackers and the Arch aur-general thread had cataloged over 400, with one master list compiled by grepping the AUR git mirror, putting it around 408, and consolidated lists climbing higher.\nThe atomic-lockfile npm package itself showed only 134 weekly downloads on Socket before it was pulled from the registry, so the real exposure is the AUR build path rather than npm installs.\nA second wave used bun install js-digest, pushed from a separate set of accounts that community trackers link to the same npm publisher as atomic-lockfile. Its payload is a different binary, a separate ELF by its hash, that the community also flagged as malicious.\nHow far this wave has spread is still being counted. Early breakdowns listed a few dozen packages, while later grep-based searches of the AUR mirror returned much higher numbers that may include churn as commits are removed. Either way, it is not a footnote to the first wave, so check for both atomic-lockfile and js-digest.\nWhat to do now\nArch maintainers are resetting the malicious commits, banning the accounts, and asking users to keep reporting suspect packages in the mailing-list thread.\nTreat the published affected-package list as incomplete. On your end:\n- Check any AUR package installed or updated on or after June 11 against the community package lists and detection scripts, which compare your foreign packages against the known-bad set. Grep recent build history and caches for npm install atomic-lockfile, bun install js-digest, and the payload path src/hooks/deps.\n- If a flagged package ran, treat the host as credential-compromised. Rotate everything the stealer touches: browser sessions, SSH keys, GitHub and npm tokens, Slack, Teams and Discord sessions, Vault tokens, Docker and Podman credentials, and any cloud keys.\n- Hunt for persistence. Check for unknown systemd services (both system units and ~/.config/systemd/user/) and unexpected files under /var/lib/. Inspect /sys/fs/bpf/ for the maps hidden_pids, hidden_names, and hidden_inodes. Review outbound connections to Tor and to upload services.\n- If the package ran as root, assume the rootkit is present and reinstall from trusted media. There is no way to trust the system otherwise.\n- Going forward, read the PKGBUILD and any .install hooks before you build, especially for packages recently adopted or suddenly active after long dormancy. If you do not understand the build instructions, do not install the package.\nFor detection, the main payload's SHA-256 is 6144d433f8a0316869877b5f834c801251bbb936e5f1577c5680878c7443c98b; the full indicator set, including the onion C2 host, is in the ioctl.fail analysis.\nThe same adoption tactic hit an abandoned PDF-viewer package back in 2018; the 2026 version just scaled it up, part of a broader run of supply-chain attacks that hijack orphaned projects to inherit trust rather than typosquatting to trick users. The affected list is still incomplete, and no CVE has been assigned; Sonatype tracks the campaign as Sonatype-2026-003775 (CVSS 8.7).\nThe attack worked because the AUR still trusts a package's name and history over who is maintaining it now. A recently adopted package, or one that suddenly sprouts new install hooks, now deserves the same suspicion as a package from a stranger.",
+    "expected": {
+      "threat_category": "Supply Chain",
+      "severity_score": 58.0,
+      "cves": [],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [
+          "6144d433f8a0316869877b5f834c801251bbb936e5f1577c5680878c7443c98b"
+        ],
+        "url": [
+          "http://temp.sh"
+        ],
+        "email": []
+      },
+      "ttps": [
+        "T1195.001",
+        "T1059.004"
+      ],
+      "geo_origin": null,
+      "geo_targets": [
+        "Global"
+      ],
+      "sector_targets": [
+        "Tech",
+        "Software Development"
+      ]
+    }
+  },
+  {
+    "title": "Over 73,000 French govt employees affected in Tchap messenger breach",
+    "text": "The French government revealed that a recent breach of its Tchap encrypted messaging platform affects the accounts of over 73,000 employees in the French public sector.\nDINUM, the French government's digital affairs directorate, disclosed on Monday that a threat actor gained access to the Tchap platform using a compromised user account and notified France's data protection authority (CNIL) due to the potential exposure of personal data shared by some users.\nWhile it initially shared almost no details about what was exposed and how many people were affected by this breach, the DINUM disclosed in a subsequent update that the attackers may have accessed information shared by around 9% of all registered users on the platform.\nDINUM explained that while private conversations are encrypted and their content protected, the attacker was able to steal all the data shared in public chat rooms, which are not encrypted. This allowed them to collect the users' names and email addresses, as well as their avatar images and the public sector organization they work for.\n\"Of the more than 825,000 registered agents, 73,467 agents would be affected by this incident, or less than 9% of registered users. These forums, by design, are open to all users and their messages are not encrypted. Officers' private conversations remain protected,\" it said.\n\"At this point, the account behind the malicious requests has been identified. It was immediately blocked in order to remove the attacker's persistent access and allow in-depth analysis of the data he was able to access. Potentially exposed data from user accounts concerns at least: last name, first name, email address, belonging entity and avatar.\"\nAlthough DINUM has yet to attribute this breach, a threat actor claimed responsibility for the attack over the weekend and shared a sample of stolen files, saying they gained access to the platform following a social engineering attack.\nThe threat actor claimed to have scraped nearly 650,000 messages and information from more than 73,000 accounts, including their email addresses, meeting links, organization information, as well as account and device metadata.\nThey've also allegedly stolen over 13.5GB of documents and media files shared by public servants using the Tchap service, as well as hardcoded LDAP credentials leaked via a PowerShell script.\nDeveloped by DINUM in collaboration with ANSSI (the French Cybersecurity Agency) in 2018, Tchap is a decentralized collaboration tool and instant messaging platform for the French public sector, based on the Matrix protocol.\nAfter becoming the default app for work communications for all civil servants in early August 2025, Tchap has reached over 300,000 monthly users and now has over 500,000 downloads on Google's Play Store.\nIn May, French authorities also arrested a 15-year-old suspected of selling data stolen in an April cyberattack on ANTS (Agence nationale des titres s\u00e9curis\u00e9s), the country's agency for issuing and managing official identity and registration documents.\nTest every layer before attackers do\nSecurity teams log 54% of successful attacks and alert on just 14%. The rest move through your environment unseen.\nThe Picus whitepaper shows how breach and attack simulation tests your SIEM and EDR rules so threats stop slipping by detection.\nGet the whitepaper",
+    "expected": {
+      "threat_category": "Data Breach",
+      "severity_score": 52.0,
+      "cves": [],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1566"
+      ],
+      "geo_origin": null,
+      "geo_targets": [
+        "France"
+      ],
+      "sector_targets": [
+        "Government"
+      ]
+    }
+  },
+  {
+    "title": "CISA orders feds to patch actively exploited Ivanti flaw by Sunday",
+    "text": "The U.S. Cybersecurity and Infrastructure Security Agency (CISA) ordered government agencies to patch an actively exploited Ivanti Sentry flaw within three days, as mandated by the newly issued Binding Operational Directive (BOD) 26-04.\nTracked as CVE-2026-10520, this maximum-severity vulnerability was found in Ivanti's security gateway appliance (formerly known as MobileIron Sentry) and stems from an OS command injection weakness.\nOn Wednesday, one day after Ivanti released patches for CVE-2026-10520 and said that it had no evidence of in-the-wild exploitation, the Shadowserver Internet security watchdog reported that attackers had already backdoored many of the Sentry gateways exposed online.\nIvanti has yet to update its advisory to warn that CVE-2026-10520 is under active exploitation, and an Ivanti spokesperson has not responded when contacted by BleepingComputer for further details on these ongoing attacks.\nWhile Shadowserver now tracks just over 50 Sentry admin portals exposed online, it says the number of Internet-exposed Ivanti Sentry instances it can detect is likely limited by organizations blocking its security scanner, and warns that systems that weren't already patched are likely compromised.\n\"We are observing a large amount of Ivanti Sentry CVE-2026-10520 exploitation attempts based on the public PoC today,\" it said.\n\"While our detection is on the lowish side due to multiple Ivanti Sentry instances not reachable in our scans (blocklisted?), if you have not patched now you are most likely compromised.\"\nOn Thursday, CISA also confirmed that the CVE-2026-10520 vulnerability is now actively exploited in attacks and added it to its Known Exploited Vulnerabilities Catalog (KEV), ordering Federal Civilian Executive Branch (FCEB) agencies to secure their Ivanti Sentry instances within three days, as required by Binding Operational Directive (BOD) 26-04.\n\"This type of vulnerability is a frequent attack vector for malicious cyber actors and poses significant risks to the federal enterprise,\" the cybersecurity agency warned. \"Follow applicable BOD 26-04 guidance for cloud services or discontinue use of the product if mitigations are unavailable. Stakeholders are responsible for evaluating each asset's internet exposure and ensuring adherence to BOD 26-04 patching guidelines.\"\nBOD 26-04 was issued on Wednesday (superseding and revoking the older BOD 19-02 and BOD 22-01), and it requires U.S. federal agencies to prioritize patching if the asset is publicly exposed online, if the security flaw was added to CISA's KEV catalog, if exploitation can be automated for large-scale attacks, and if successful exploitation gives attackers partial or total control of a targeted system.\nWhile CVE-2026-10520 is the first vulnerability for which BOD 26-04 applies, in recent weeks CISA has ordered federal agencies to patch other security flaws within three days, including a Check Point VPN zero-day, a high-severity Oracle WebLogic Server vulnerability exploited in the wild, and an actively exploited cPanel plugin flaw.\nOver the past several years, CISA has flagged 35 vulnerabilities across a wide range of Ivanti products that have been abused in attacks, with 12 targeted by ransomware gangs.\nTest every layer before attackers do\nSecurity teams log 54% of successful attacks and alert on just 14%. The rest move through your environment unseen.\nThe Picus whitepaper shows how breach and attack simulation tests your SIEM and EDR rules so threats stop slipping by detection.\nGet the whitepaper",
+    "expected": {
+      "threat_category": "Vulnerability",
+      "severity_score": 70.0,
+      "cves": [
+        "CVE-2026-10520"
+      ],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1190"
+      ],
+      "geo_origin": null,
+      "geo_targets": [
+        "US"
+      ],
+      "sector_targets": [
+        "Government"
+      ]
+    }
+  },
+  {
+    "title": "Pharma giant Novo Nordisk discloses breach of clinical trials data",
+    "text": "Danish pharmaceutical giant Novo Nordisk, the world's largest producer of insulin, disclosed a data breach affecting patient information from some clinical trials.\nFounded in 1923, Novo Nordisk now employs around 67,900 people across 80 offices worldwide and is the maker of viral GLP-1 receptor agonist drugs Wegovy and Ozempic.\nThe company revealed on Thursday that attackers gained access to its internal IT systems and data related to patients participating in some clinical trials, including their patient IDs (random alphanumeric strings) and information on trial participation, sex, year of birth, biomarkers, health/immunogenicity data, and lifestyle factors (e.g., smoking, alcohol use, BMI).\nHowever, Novo Nordisk said that this data was pseudonymized and that the attackers can't use it to identify any affected patients by name.\n\"While our investigation and response are ongoing, we have discovered that certain non-public data, including personal data, was copied externally without authorisation. We are informing the impacted parties as appropriate,\" the company said.\n\"This information is not directly linked to any patients by name or other direct identifiers. Information about identity would therefore require access to underlying information, identifying patients by name etc. This information was not exposed. We therefore do not consider the incident to enable any third party to identify participants in our clinical trials.\"\nThe data breach also affects an undisclosed number of healthcare professionals (HCPs), whose names, registration numbers, e-mail addresses, phone numbers, WhatsApp details, and office locations have been exposed.\nNovo Nordisk warned affected HCPs to be wary of unexpected messages or calls, as they may be targeted in phishing attacks via e-mail, phone, WhatsApp, or fraudulent messages impersonating their colleagues.\nThe company has taken the compromised internal IT systems offline but noted that its core business operations were not impacted. Novo Nordisk is now investigating the incident with the help of external cybersecurity experts to assess the full impact and scope of the breach.\n\"We are working to bring the affected systems back online in a controlled and safe manner; however, we acknowledge this process takes time. Our core business operations are not impacted and remain up and running,\" Novo Nordisk added.\nNovo Nordisk has yet to disclose when the breach was detected and how many individuals had their personal and patient data exposed.\nWhen BleepingComputer reached out for more details on the attack, a Novo Nordisk spokesperson referred us back to the company's press release.\nUpdate June 12, 06:28 EDT: Added Novo Nordisk reply.\nTest every layer before attackers do\nSecurity teams log 54% of successful attacks and alert on just 14%. The rest move through your environment unseen.\nThe Picus whitepaper shows how breach and attack simulation tests your SIEM and EDR rules so threats stop slipping by detection.\nGet the whitepaper",
+    "expected": {
+      "threat_category": "Data Breach",
+      "severity_score": 50.0,
+      "cves": [],
+      "threat_actors": [],
+      "iocs_by_type": {
+        "ip": [],
+        "domain": [],
+        "hash": [],
+        "url": [],
+        "email": []
+      },
+      "ttps": [
+        "T1566"
+      ],
+      "geo_origin": null,
+      "geo_targets": [
+        "Worldwide"
+      ],
+      "sector_targets": [
+        "Healthcare"
+      ]
+    }
+  }
+]

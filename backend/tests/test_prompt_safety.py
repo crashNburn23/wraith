@@ -38,6 +38,7 @@ def test_rag_wraps_retrieved_context_as_untrusted():
         [],
         [],
         [],
+        [],
     )
 
     assert context.startswith("<UNTRUSTED_DATA")

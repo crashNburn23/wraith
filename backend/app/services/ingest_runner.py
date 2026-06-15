@@ -35,6 +35,10 @@ def _is_title_dup(tokens: frozenset[str], recent: list[frozenset[str]]) -> bool:
     return False
 
 
+def _final_ingest_status(run: job_state.JobRun) -> str:
+    return "partial" if run.failed else "completed"
+
+
 async def run_ingest(db: Session) -> dict:
     sources = db.query(Source).filter(Source.is_active == True).all()
     run = job_state.start_run("ingest", total=len(sources))
@@ -130,6 +134,6 @@ async def run_ingest(db: Session) -> dict:
         db.commit()
         job_state.save_run(run)
 
-    job_state.finish_run(run, status="completed")
+    job_state.finish_run(run, status=_final_ingest_status(run))
     logger.info("Ingest complete: %s", run.to_dict())
     return run.to_dict()

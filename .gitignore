@@ -32,3 +32,6 @@ backend/cti_platform.egg-info/
 
 # Local notes
 TODO.md
+
+# Claude Code project instructions (local only — contains personal vault paths)
+CLAUDE.md

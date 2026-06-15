@@ -2,7 +2,9 @@ from app.models import (
     Article, ArticleActor, Bulletin, BulletinItem, CVEMention,
     Source, TTPTag, ThreatActor,
 )
-from app.services.clustering import cluster_bulletin_items
+import pytest
+
+from app.services.clustering import cluster_bulletin_items, confirm_story_clusters
 from uuid import uuid4
 
 
@@ -71,3 +73,98 @@ def test_shared_cve_clusters(db):
     cluster_bulletin_items(db, bulletin)
 
     assert bulletin.items[0].cluster_id == bulletin.items[1].cluster_id
+
+
+@pytest.mark.parametrize("response", ['{"same_story": true}', '```json\n{"same_story": true}\n```'])
+async def test_llm_confirmation_keeps_confirmed_cluster(db, monkeypatch, response):
+    bulletin, articles = _bulletin_with_articles(db)
+    for article in articles:
+        db.add(CVEMention(article_id=article.id, cve_id="CVE-2026-12345"))
+    db.commit()
+    cluster_bulletin_items(db, bulletin)
+
+    calls = []
+
+    async def fake_complete(prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        return response
+
+    monkeypatch.setattr("app.services.clustering.llm_complete", fake_complete)
+    await confirm_story_clusters(bulletin)
+
+    assert len(calls) == 1
+    assert "UNTRUSTED_DATA" in calls[0][0]
+    assert bulletin.items[0].cluster_id == bulletin.items[1].cluster_id
+
+
+async def test_llm_confirmation_dissolves_rejected_cluster(db, monkeypatch):
+    bulletin, articles = _bulletin_with_articles(db)
+    for article in articles:
+        db.add(CVEMention(article_id=article.id, cve_id="CVE-2026-12345"))
+    db.commit()
+    cluster_bulletin_items(db, bulletin)
+
+    async def fake_complete(*args, **kwargs):
+        return '{"same_story": false}'
+
+    monkeypatch.setattr("app.services.clustering.llm_complete", fake_complete)
+    await confirm_story_clusters(bulletin)
+
+    assert all(item.cluster_id is None for item in bulletin.items)
+    assert all(item.cluster_size == 1 for item in bulletin.items)
+    assert all(item.is_cluster_lead for item in bulletin.items)
+
+
+async def test_llm_confirmation_skips_singletons(db, monkeypatch):
+    bulletin, _ = _bulletin_with_articles(db)
+    calls = 0
+
+    async def fake_complete(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return '{"same_story": true}'
+
+    monkeypatch.setattr("app.services.clustering.llm_complete", fake_complete)
+    await confirm_story_clusters(bulletin)
+
+    assert calls == 0
+
+
+async def test_llm_confirmation_can_be_disabled(db, monkeypatch):
+    bulletin, articles = _bulletin_with_articles(db)
+    for article in articles:
+        db.add(CVEMention(article_id=article.id, cve_id="CVE-2026-12345"))
+    db.commit()
+    cluster_bulletin_items(db, bulletin)
+    calls = 0
+
+    async def fake_complete(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return '{"same_story": false}'
+
+    monkeypatch.setattr("app.services.clustering.settings.LLM_CONFIRM_STORY_CLUSTERS", False)
+    monkeypatch.setattr("app.services.clustering.llm_complete", fake_complete)
+    await confirm_story_clusters(bulletin)
+
+    assert calls == 0
+    assert bulletin.items[0].cluster_id == bulletin.items[1].cluster_id
+
+
+@pytest.mark.parametrize("response", ["not json", '{"same_story": "yes"}'])
+async def test_llm_confirmation_fails_open(db, monkeypatch, response):
+    bulletin, articles = _bulletin_with_articles(db)
+    for article in articles:
+        db.add(CVEMention(article_id=article.id, cve_id="CVE-2026-12345"))
+    db.commit()
+    cluster_bulletin_items(db, bulletin)
+    original_cluster_id = bulletin.items[0].cluster_id
+
+    async def fake_complete(*args, **kwargs):
+        return response
+
+    monkeypatch.setattr("app.services.clustering.llm_complete", fake_complete)
+    await confirm_story_clusters(bulletin)
+
+    assert bulletin.items[0].cluster_id == original_cluster_id
+    assert bulletin.items[1].cluster_id == original_cluster_id

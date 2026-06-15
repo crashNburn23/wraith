@@ -1,9 +1,78 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import { Link } from "react-router-dom";
 import { Button } from "../components/ui";
 import { getToken } from "../lib/auth";
 
-function Message({ role, content }) {
+function ResultsPanel({ results }) {
+  if (!results) return null;
+  const citations = results.citations || [];
+  const relationships = results.relationships || [];
+  return (
+    <div className="mt-3 pt-3 border-t border-navy-border space-y-3">
+      {results.deterministic && (
+        <div className="flex items-center justify-between bg-brand-900/10 border border-brand-500/15 rounded-lg px-3 py-2">
+          <span className="text-[10px] uppercase tracking-widest text-brand-400 font-mono">{results.deterministic.kind}</span>
+          <span className="text-lg text-white font-mono font-bold">{results.deterministic.value}</span>
+        </div>
+      )}
+      {citations.length > 0 && (
+        <details open={Boolean(results.deterministic)}>
+          <summary className="text-[10px] uppercase tracking-widest text-slate-500 font-mono cursor-pointer">
+            Sources ({citations.length})
+          </summary>
+          <div className="mt-2 space-y-2 max-h-72 overflow-y-auto">
+            {citations.map((citation, index) => (
+              <div key={citation.id} className="bg-navy-900 border border-navy-border rounded-lg px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] text-brand-400 font-mono">A{index + 1}</span>
+                  <div className="min-w-0 flex-1">
+                    <Link to={`/articles/${citation.id}`} className="text-xs text-slate-200 hover:text-brand-300 font-medium">
+                      {citation.title}
+                    </Link>
+                    <div className="text-[10px] text-slate-600 font-mono mt-0.5">
+                      {[citation.source, citation.published_at && new Date(citation.published_at).toLocaleDateString()].filter(Boolean).join(" · ")}
+                    </div>
+                    {citation.evidence?.map((excerpt, i) => (
+                      <blockquote key={i} className="text-[10px] text-slate-500 border-l border-brand-500/30 pl-2 mt-1.5 line-clamp-2">{excerpt}</blockquote>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+      {relationships.length > 0 && (
+        <details>
+          <summary className="text-[10px] uppercase tracking-widest text-slate-500 font-mono cursor-pointer">
+            Related entities ({relationships.length})
+          </summary>
+          <div className="mt-2 flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+            {relationships.map((item, index) => (
+              <Link
+                key={`${item.article_id}-${item.type}-${item.value}-${index}`}
+                to={`/articles/${item.article_id}`}
+                title={`${item.article_title}${item.evidence ? `\n${item.evidence}` : ""}`}
+                className="text-[10px] font-mono px-2 py-1 rounded border border-navy-border bg-navy-900 text-slate-400 hover:text-brand-300 hover:border-brand-500/30"
+              >
+                {item.type}: {item.value}
+              </Link>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function Message({ role, content, results }) {
+  const citedContent = role === "assistant"
+    ? (content || "").replace(/\[A(\d+)\]/g, (marker, number) => {
+        const citation = results?.citations?.[Number(number) - 1];
+        return citation ? `[${marker}](/articles/${citation.id})` : marker;
+      })
+    : content;
   return (
     <div className={`flex ${role === "user" ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-2xl rounded-xl px-4 py-3 text-sm leading-relaxed ${
@@ -15,7 +84,16 @@ function Message({ role, content }) {
           <pre className="whitespace-pre-wrap font-sans">{content}</pre>
         ) : (
           <div className="chat-markdown">
-            <ReactMarkdown>{content}</ReactMarkdown>
+            <ReactMarkdown
+              components={{
+                a: ({ href, children }) => href?.startsWith("/articles/")
+                  ? <Link to={href}>{children}</Link>
+                  : <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+              }}
+            >
+              {citedContent}
+            </ReactMarkdown>
+            <ResultsPanel results={results} />
           </div>
         )}
       </div>
@@ -24,8 +102,8 @@ function Message({ role, content }) {
 }
 
 const SUGGESTIONS = [
-  "What ransomware groups have been active recently?",
-  "Show me articles mentioning CVE-2024",
+  "How many ransomware articles were published in the last 30 days?",
+  "Show a timeline for CVE-2024-3094",
   "What IOCs are associated with Lazarus Group?",
 ];
 
@@ -83,7 +161,8 @@ export default function Chat() {
       let assistantContent = "";
       let buffer = "";
       let streamDone = false;
-      setMessages(prev => [...prev, { role: "assistant", content: "" }]);
+      let assistantResults = null;
+      setMessages(prev => [...prev, { role: "assistant", content: "", results: null }]);
 
       const consumeEvents = () => {
         const events = buffer.split(/\r?\n\r?\n/);
@@ -96,11 +175,15 @@ export default function Chat() {
               streamDone = true;
               return;
             }
-            const { text } = JSON.parse(raw);
-            assistantContent += text;
+            const eventData = JSON.parse(raw);
+            if (eventData.type === "results") {
+              assistantResults = eventData;
+            } else {
+              assistantContent += eventData.text || "";
+            }
             setMessages(prev => {
               const copy = [...prev];
-              copy[copy.length - 1] = { role: "assistant", content: assistantContent };
+              copy[copy.length - 1] = { role: "assistant", content: assistantContent, results: assistantResults };
               return copy;
             });
           }
@@ -146,7 +229,7 @@ export default function Chat() {
       <div className="px-6 py-4 border-b border-navy-border flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-white">CTI Chat</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Ask about threats, IOCs, CVEs, or actors in your intel database</p>
+          <p className="text-xs text-slate-500 mt-0.5">Query counts, timelines, relationships, and evidence in your intel database</p>
         </div>
         {messages.length > 0 && (
           <button
@@ -184,7 +267,7 @@ export default function Chat() {
             </div>
           </div>
         )}
-        {messages.map((m, i) => <Message key={i} role={m.role} content={m.content} />)}
+        {messages.map((m, i) => <Message key={i} role={m.role} content={m.content} results={m.results} />)}
         {error && <div className="text-red-400 text-sm bg-red-900/20 border border-red-900/40 rounded-lg px-3 py-2">{error}</div>}
         <div ref={bottomRef} />
       </div>

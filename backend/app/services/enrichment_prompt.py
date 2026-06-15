@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # Bump PROMPT_VERSION when the system prompt changes substantively.
 # Bump SCHEMA_VERSION when EnrichmentResult fields change.
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 SCHEMA_VERSION = "1"
 
 SYSTEM_PROMPT = UNTRUSTED_CONTENT_RULE + """
@@ -83,7 +83,17 @@ Format requirements:
 - URLs: complete http/https URL attributed to the threat actor, not a reference to a vendor or news site
 - Emails: actual email address attributed to the threat actor
 
-Only include TTPs you can clearly map to MITRE ATT&CK.
+TTP EXTRACTION RULES — quality over coverage:
+- Only include a TTP if you can copy a specific sentence from the article into source_excerpt that directly describes that technique being used. If you cannot find a supporting sentence, omit the TTP entirely.
+- T1566 (Phishing) must only appear when the article explicitly describes a phishing email, lure document, or spearphishing attachment/link as the delivery mechanism. Do NOT assign T1566 to articles about APT activity, exploitation, supply chain compromise, or general threat actor coverage unless phishing is specifically described as the delivery method.
+- Use the most specific sub-technique available (e.g. T1195.001 for compromised package repositories, T1059.003 for Windows Command Shell) rather than the parent technique alone.
+- Do not include deprecated or non-existent technique IDs. All IDs must be in the format T followed by 4 digits, optionally followed by a period and 3 digits (e.g. T1190, T1059.003).
+
+THREAT ACTOR RULES:
+- Only include well-established attribution names: named APT groups (APT28, Lazarus Group, Velvet Ant, Scattered Spider), tracked campaign names from major vendors (UNC4899, TA453, TEMP.Veles), or named criminal organizations.
+- Do NOT include: vulnerability database tracking IDs (Sonatype-2026-XXXX, GHSA-XXXX), unresolved internal codes (UNK_*, DEV-XXXX), legal entity names from lawsuits unless they are a known threat group, or generic descriptions ("Chinese hackers", "unknown actor", "threat actor").
+- If attribution is unclear or only described generically, leave threat_actors empty.
+
 Return ONLY valid JSON, no markdown fences, no commentary."""
 
 
@@ -94,7 +104,12 @@ def _build_user_message(title: str, text: str) -> str:
     ])
 
 
-async def enrich_article(title: str, text: str, corrections_block: str = "") -> EnrichmentResult:
+async def enrich_article(
+    title: str,
+    text: str,
+    corrections_block: str = "",
+    model: str | None = None,
+) -> EnrichmentResult:
     client = get_llm_client()
     user_msg = _build_user_message(title, text)
     if corrections_block:
@@ -104,7 +119,7 @@ async def enrich_article(title: str, text: str, corrections_block: str = "") -> 
     try:
         if is_anthropic():
             response = await client.messages.create(
-                model=settings.LLM_MODEL,
+                model=model or settings.LLM_MODEL,
                 max_tokens=2000,
                 temperature=0,
                 system=system_prompt,
@@ -113,7 +128,7 @@ async def enrich_article(title: str, text: str, corrections_block: str = "") -> 
             raw = response.content[0].text.strip()
         else:
             response = await client.chat.completions.create(
-                model=settings.LLM_MODEL,
+                model=model or settings.LLM_MODEL,
                 temperature=0,
                 max_tokens=2000,
                 response_format={"type": "json_object"},
